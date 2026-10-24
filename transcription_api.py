@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 
+import logging
+import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from google import genai
 from starlette.concurrency import run_in_threadpool
+
+from auth import COOKIE_NAME, SESSION_SECONDS, check_login_rate, create_session, delete_session, require_user, verify_credentials
 
 from transcription_diarize import (
     DEFAULT_FALLBACK_MODEL,
@@ -38,6 +44,65 @@ Rules:
 
 
 app = FastAPI(title="Gemini Transcription API", version="1.0.0")
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+logger = logging.getLogger(__name__)
+
+
+@app.middleware("http")
+async def protect_requests(request: Request, call_next):
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        if origin and origin != str(request.base_url).rstrip("/"):
+            return JSONResponse({"detail": "Cross-site requests are not allowed."}, status_code=403)
+    # Authenticate before parsing a potentially large multipart upload.
+    if request.url.path.rstrip("/") == "/transcribe":
+        try:
+            require_user(request)
+        except HTTPException as exc:
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/", include_in_schema=False)
+def frontend() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+class LoginInput(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+@app.post("/auth/login")
+def login(credentials: LoginInput, request: Request, response: Response) -> dict:
+    check_login_rate(request)
+    if not verify_credentials(credentials.username, credentials.password):
+        raise HTTPException(401, "Incorrect username or password.")
+    delete_session(request)
+    response.set_cookie(
+        COOKIE_NAME, create_session(), max_age=SESSION_SECONDS, httponly=True,
+        secure=os.getenv("SECURE_COOKIES", "false").lower() == "true", samesite="strict",
+    )
+    return {"username": credentials.username}
+
+
+@app.get("/auth/me")
+def current_user(username: str = Depends(require_user)) -> dict:
+    return {"username": username, "max_upload_mb": int(os.getenv("MAX_UPLOAD_MB", "500"))}
+
+
+@app.post("/auth/logout", status_code=204)
+def logout(request: Request) -> Response:
+    delete_session(request)
+    response = Response(status_code=204)
+    response.delete_cookie(COOKIE_NAME, httponly=True, samesite="strict")
+    return response
 
 
 def _run_pipeline(
@@ -75,10 +140,11 @@ def health() -> dict:
 
 @app.post("/transcribe", response_class=PlainTextResponse)
 async def transcribe(
+    username: str = Depends(require_user),
     file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL),
-    chunk_minutes: float = Form(20.0),
-    language_hint: str = Form("fa"),
+    chunk_minutes: float = Form(20.0, ge=0, le=120),
+    language_hint: str = Form("fa", max_length=100),
     fallback_model: str = Form(DEFAULT_FALLBACK_MODEL),
     prompt: str = Form(API_DEFAULT_PROMPT),
 ) -> PlainTextResponse:
@@ -91,13 +157,19 @@ async def transcribe(
     input_path = tmp_dir / f"input{suffix}"
 
     try:
+        size = 0
+        max_bytes = int(os.getenv("MAX_UPLOAD_MB", "500")) * 1024 * 1024
         with input_path.open("wb") as f:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
                     break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(413, "File exceeds the upload size limit.")
                 f.write(chunk)
-        await file.close()
+        if size == 0:
+            raise HTTPException(400, "The uploaded file is empty.")
 
         txt_output = await run_in_threadpool(
             _run_pipeline,
@@ -117,8 +189,10 @@ async def transcribe(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=500, detail="Transcription failed. Check that the file contains playable audio and try again. If it continues, check the server logs and Gemini API configuration.") from e
     finally:
+        await file.close()
         try:
             if input_path.exists():
                 input_path.unlink()

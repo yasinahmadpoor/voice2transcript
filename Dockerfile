@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY transcription_diarize.py transcription_api.py ./
+COPY transcription_diarize.py transcription_api.py auth.py setup_login.py ./
+COPY static/ ./static/
 
 RUN mkdir -p /app/outputs /tmp/opencode
 

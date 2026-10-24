@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+outputs/
+docker-compose.override.yml
+.pytest_cache/
+.agents/
+.aws/
+.codex/
+screenshots/
