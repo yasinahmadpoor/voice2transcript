@@ -54,7 +54,7 @@ async function workspace({ jobs = [], saved = null } = {}) {
   }
   const requests = [];
   const context = vm.createContext({
-    document: { getElementById: get, querySelectorAll: () => inputs, createElement: () => get(`created-${++elementId}`) },
+    document: { getElementById: get, querySelectorAll: () => inputs, createElement: () => get(`created-${++elementId}`), documentElement: {dataset:{theme:'dark'}}, querySelector: () => get('theme-meta') },
     window: { addEventListener() {} },
     localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     FormData: MultipartData, AbortController,

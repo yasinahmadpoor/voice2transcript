@@ -1,19 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f8fa">
+  <meta name="theme-color" content="#131722">
   <title>Voice to Transcript</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='13' fill='%23665be8'/%3E%3Cpath d='M14 21v6m7-13v20m7-24v28m7-17v6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <script src="/static/theme.js"></script>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="Voice to Transcript home"><span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>voice<span class="brand-light"> / transcript</span></span></a>
-    <div id="account" class="account" hidden><span id="username-label"></span><button id="logout" class="quiet-button" type="button">Sign out <span aria-hidden="true">↗</span></button></div>
-    <span id="header-note" class="header-note">A little less listening. A lot more clarity.</span>
+    <div class="header-actions">
+      <span id="header-note" class="header-note">A little less listening. A lot more clarity.</span>
+      <div id="account" class="account" hidden><span id="username-label"></span><button id="logout" class="quiet-button" type="button">Sign out <span aria-hidden="true">↗</span></button></div>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode"><span id="theme-icon" aria-hidden="true">☀</span><span id="theme-label" class="theme-label">Light mode</span></button>
+    </div>
   </header>
 
   <main>

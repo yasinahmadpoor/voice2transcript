@@ -2,6 +2,8 @@
 
 A FastAPI app that transcribes audio or video with Gemini and adds speaker labels. Recordings run as persistent background jobs with **two active transcriptions** by default. The interface includes login, upload and preview, language and model settings, an editable prompt, recent job history, status updates, retries, and editable transcripts with copying and text downloads. Persian is the default language hint; leave it blank for auto-detection. Settings start collapsed and load defaults from the API.
 
+The interface starts in dark mode. Use the theme button in the header to switch between dark and light; your choice is saved in the browser and applies to both the login page and workspace.
+
 ## Run locally
 
 Requires Python 3.10+ and `ffmpeg` / `ffprobe` on your PATH.
