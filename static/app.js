@@ -7,6 +7,15 @@ let activeRequest = null;
 let elapsedTimer = null;
 let toastTimer = null;
 let transcriptFilename = 'transcription.txt';
+let transcriptionDefaults = null;
+const settingInputs = document.querySelectorAll('[data-transcription-setting]');
+
+function resetSettings() {
+  if (!transcriptionDefaults) return;
+  for (const input of settingInputs) input.value = transcriptionDefaults[input.name];
+}
+
+$('reset-settings').addEventListener('click', resetSettings);
 
 function showError(id, message = '') {
   $(id).textContent = message;
@@ -39,6 +48,13 @@ async function openWorkspace() {
     return;
   }
   const data = await response.json();
+  const defaultsResponse = await fetch('/transcription/defaults');
+  if (!defaultsResponse.ok) {
+    showLogin(await errorMessage(defaultsResponse));
+    return;
+  }
+  transcriptionDefaults = await defaultsResponse.json();
+  resetSettings();
   maxUploadMb = data.max_upload_mb;
   $('upload-limit').textContent = maxUploadMb;
   $('username-label').textContent = data.username;
@@ -123,7 +139,8 @@ function setBusy(value) {
   $('transcribe-button').textContent = value ? 'Transcribing…' : 'Transcribe recording →';
   $('file-input').disabled = value;
   $('remove-file').disabled = value;
-  $('language').disabled = value;
+  for (const input of settingInputs) input.disabled = value;
+  $('reset-settings').disabled = value;
   $('dropzone').classList.toggle('disabled', value);
   $('processing').hidden = !value;
   $('transcript-panel').setAttribute('aria-busy', String(value));
@@ -149,9 +166,9 @@ $('transcribe-form').addEventListener('submit', async (event) => {
   showError('upload-error');
   const file = selectedFile;
   const previousTranscript = $('transcript-text').value;
-  const form = new FormData();
-  form.append('file', file);
-  form.append('language_hint', $('language').value);
+  const form = new FormData($('transcribe-form'));
+  // Dragged files may differ from the native input's current FileList.
+  form.set('file', file);
   $('empty-result').hidden = true;
   $('result').hidden = true;
   $('result-badge').hidden = true;

@@ -1,6 +1,6 @@
 # Voice to Transcript
 
-A FastAPI app that transcribes audio or video with Gemini and adds speaker labels. The web interface includes a private login, file upload and preview, language selection, an editable transcript, copying, and UTF-8 text downloads. Persian is the default language hint; auto-detection is available.
+A FastAPI app that transcribes audio or video with Gemini and adds speaker labels. The web interface includes a private login, file upload and preview, a custom language hint, model and fallback model inputs, chunk length, an editable transcription prompt, an editable transcript, copying, and UTF-8 text downloads. Persian is the default language hint; leave it blank for auto-detection. The form loads its initial settings from the API, and **Reset to API defaults** restores them.
 
 ## Run locally
 
@@ -35,13 +35,14 @@ Open <http://localhost:8000>. For deployment, terminate HTTPS at your reverse pr
 
 ## API
 
-`GET /health` is public. Sign in with `POST /auth/login` using JSON `{"username":"admin","password":"your password"}` and keep the returned HTTP-only session cookie. `GET /auth/me` returns the signed-in account, and `POST /auth/logout` revokes the session. `POST /transcribe` requires the cookie and accepts the existing multipart fields: `file`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Its response remains a plain-text attachment. Browser writes must originate from the same site.
+`GET /health` is public. Sign in with `POST /auth/login` using JSON `{"username":"admin","password":"your password"}` and keep the returned HTTP-only session cookie. `GET /auth/me` returns the signed-in account, `GET /transcription/defaults` returns the form defaults, and `POST /auth/logout` revokes the session. `POST /transcribe` requires the cookie and accepts the existing multipart fields: `file`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Its response remains a plain-text attachment. Browser writes must originate from the same site.
 
 ## Verify
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
 node --check static/app.js
+node --test tests/frontend.test.cjs
 ```
 
 The tests stub Gemini transcription, so they do not send recordings or incur API charges. Actual transcription requires a valid Gemini API key and an accessible model. The existing command-line tool (`transcription_diarize.py`) is unchanged and does not require a web login.

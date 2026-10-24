@@ -558,6 +558,53 @@ select {
   font-size:12px;
 }
 
+.transcription-settings {
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  margin-bottom: 24px;
+}
+
+.transcription-settings summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 550;
+  color: #55506e;
+  padding: 3px 0;
+}
+
+.transcription-settings summary:focus-visible {
+  outline: 3px solid #aca5ff;
+  outline-offset: 4px;
+}
+
+.settings-fields {
+  display: grid;
+  gap: 10px;
+  padding-top: 18px;
+}
+
+.settings-fields label:not(:first-child) {
+  margin-top: 7px;
+}
+
+.settings-fields .field-help {
+  margin: 0;
+}
+
+.settings-fields .prompt-input {
+  min-height: 190px;
+  border: 1px solid #dedfe8;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.settings-fields .secondary-button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
 .field-help {
   font-size:10px;
   color:#9194a3;

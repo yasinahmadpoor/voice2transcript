@@ -42,6 +42,7 @@ class WebTests(unittest.TestCase):
 
     def test_anonymous_requests_are_blocked_before_pipeline(self):
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
+        self.assertEqual(self.client.get("/transcription/defaults").status_code, 401)
         with patch.object(api, "_run_pipeline") as pipeline:
             self.assertEqual(self.client.post("/transcribe", content=b"invalid multipart").status_code, 401)
             self.assertEqual(self.client.post("/transcribe/", files={"file": ("voice.wav", b"audio")}).status_code, 401)
@@ -111,6 +112,35 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertTrue(seen_paths)
         self.assertFalse(seen_paths[0].parent.exists())
+
+    def test_form_defaults_match_transcribe_api(self):
+        self.login()
+        defaults = self.client.get("/transcription/defaults").json()
+        schema = self.client.get("/openapi.json").json()
+        body_ref = schema["paths"]["/transcribe"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"]
+        fields = schema["components"]["schemas"][body_ref.rsplit("/", 1)[-1]]["properties"]
+        self.assertEqual(set(defaults), set(fields) - {"file"})
+        for name, value in defaults.items():
+            self.assertEqual(value, fields[name]["default"])
+
+    def test_custom_settings_reach_pipeline(self):
+        self.login()
+        settings = {
+            "model": "custom-primary", "fallback_model": "custom-fallback",
+            "chunk_minutes": "7.5", "language_hint": "Italian",
+            "prompt": "Transcribe verbatim.\nKeep speaker names.",
+        }
+        with patch.object(api, "_run_pipeline", return_value="Custom transcript") as pipeline:
+            response = self.client.post("/transcribe", files={"file": ("voice.wav", b"audio")}, data=settings)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(pipeline.call_args.args[1:], ("custom-primary", 7.5, "Italian", "custom-fallback", settings["prompt"]))
+
+    def test_disabled_chunking_fallback_and_auto_language(self):
+        self.login()
+        with patch.object(api, "_run_pipeline", return_value="Transcript") as pipeline:
+            response = self.client.post("/transcribe", files={"file": ("voice.wav", b"audio")}, data={"chunk_minutes": "0", "fallback_model": "", "language_hint": ""})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(pipeline.call_args.args[2:5], (0, "", ""))
 
     def test_invalid_uploads_do_not_run_pipeline(self):
         self.login()

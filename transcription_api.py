@@ -41,6 +41,8 @@ Rules:
 - No markdown fences.
 - No extra explanations.
 """
+API_DEFAULT_CHUNK_MINUTES = 20.0
+API_DEFAULT_LANGUAGE_HINT = "fa"
 
 
 app = FastAPI(title="Gemini Transcription API", version="1.0.0")
@@ -105,6 +107,17 @@ def logout(request: Request) -> Response:
     return response
 
 
+@app.get("/transcription/defaults")
+def transcription_defaults(username: str = Depends(require_user)) -> dict:
+    return {
+        "model": DEFAULT_MODEL,
+        "fallback_model": DEFAULT_FALLBACK_MODEL,
+        "chunk_minutes": API_DEFAULT_CHUNK_MINUTES,
+        "language_hint": API_DEFAULT_LANGUAGE_HINT,
+        "prompt": API_DEFAULT_PROMPT,
+    }
+
+
 def _run_pipeline(
     input_path: Path,
     model: str,
@@ -140,16 +153,25 @@ def health() -> dict:
 
 @app.post("/transcribe", response_class=PlainTextResponse)
 async def transcribe(
+    request: Request,
     username: str = Depends(require_user),
     file: UploadFile = File(...),
     model: str = Form(DEFAULT_MODEL),
-    chunk_minutes: float = Form(20.0, ge=0, le=120),
-    language_hint: str = Form("fa", max_length=100),
+    chunk_minutes: float = Form(API_DEFAULT_CHUNK_MINUTES, ge=0, le=120),
+    language_hint: str = Form(API_DEFAULT_LANGUAGE_HINT, max_length=100),
     fallback_model: str = Form(DEFAULT_FALLBACK_MODEL),
     prompt: str = Form(API_DEFAULT_PROMPT),
 ) -> PlainTextResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
+
+    # FastAPI replaces blank optional form fields with their defaults. Preserve
+    # explicit blanks for auto-detection and disabling the fallback model.
+    submitted_form = await request.form()
+    if submitted_form.get("language_hint") == "":
+        language_hint = ""
+    if submitted_form.get("fallback_model") == "":
+        fallback_model = ""
 
     suffix = Path(file.filename).suffix or ".bin"
     tmp_dir = Path("/tmp/opencode") / f"upload_{uuid4().hex}"
