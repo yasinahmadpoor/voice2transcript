@@ -1,9 +1,11 @@
 import os
+import threading
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -23,12 +25,18 @@ class WebTests(unittest.TestCase):
             "SECURE_COOKIES": "false", "MAX_UPLOAD_MB": "1",
         })
         self.env.start()
+        self.data_dir = tempfile.TemporaryDirectory()
+        self.jobs_env = patch.dict(os.environ, {"JOB_DATA_DIR": self.data_dir.name, "TRANSCRIPTION_WORKERS": "2", "MAX_PENDING_JOBS": "20"})
+        self.jobs_env.start()
         auth._sessions.clear()
         auth._attempts.clear()
         self.client = TestClient(api.app)
+        self.client.__enter__()
 
     def tearDown(self):
-        self.client.close()
+        self.client.__exit__(None, None, None)
+        self.jobs_env.stop()
+        self.data_dir.cleanup()
         self.env.stop()
 
     def login(self):
@@ -43,6 +51,11 @@ class WebTests(unittest.TestCase):
     def test_anonymous_requests_are_blocked_before_pipeline(self):
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
         self.assertEqual(self.client.get("/transcription/defaults").status_code, 401)
+        for path in ("/jobs", "/jobs/missing", "/jobs/missing/result"):
+            self.assertEqual(self.client.get(path).status_code, 401)
+        self.assertEqual(self.client.post("/jobs", content=b"invalid multipart").status_code, 401)
+        self.assertEqual(self.client.post("/jobs/missing/retry").status_code, 401)
+        self.assertEqual(self.client.delete("/jobs/missing").status_code, 401)
         with patch.object(api, "_run_pipeline") as pipeline:
             self.assertEqual(self.client.post("/transcribe", content=b"invalid multipart").status_code, 401)
             self.assertEqual(self.client.post("/transcribe/", files={"file": ("voice.wav", b"audio")}).status_code, 401)
@@ -111,7 +124,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("attachment", response.headers["content-disposition"])
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertTrue(seen_paths)
-        self.assertFalse(seen_paths[0].parent.exists())
+        self.assertFalse(seen_paths[0].exists())
 
     def test_form_defaults_match_transcribe_api(self):
         self.login()
@@ -152,10 +165,114 @@ class WebTests(unittest.TestCase):
 
     def test_pipeline_error_does_not_expose_internal_details(self):
         self.login()
-        with patch.object(api, "_run_pipeline", side_effect=RuntimeError("private-key-or-server-detail")), patch.object(api.logger, "exception"):
+        with patch.object(api, "_run_pipeline", side_effect=RuntimeError("private-key-or-server-detail")), patch("job_queue.logger.exception"):
             response = self.client.post("/transcribe", files={"file": ("voice.wav", b"audio")})
         self.assertEqual(response.status_code, 500)
         self.assertNotIn("private-key-or-server-detail", response.text)
+
+    def wait_for_job(self, job_id):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            job = self.client.get(f"/jobs/{job_id}").json()
+            if job["status"] in {"completed", "failed"}:
+                return job
+            time.sleep(0.02)
+        self.fail("Job did not finish")
+
+    def test_background_job_status_result_and_delete(self):
+        self.login()
+        with patch.object(api, "_run_pipeline", return_value="SPEAKER_1: Background result"):
+            response = self.client.post("/jobs", files={"file": ("voice.wav", b"audio")})
+            self.assertEqual(response.status_code, 202)
+            job_id = response.json()["id"]
+            self.assertEqual(response.headers["location"], f"/jobs/{job_id}")
+            self.assertEqual(self.wait_for_job(job_id)["status"], "completed")
+        listing = self.client.get("/jobs").json()
+        self.assertEqual(listing["max_active"], 2)
+        self.assertEqual(listing["jobs"][0]["id"], job_id)
+        result = self.client.get(f"/jobs/{job_id}/result")
+        self.assertEqual(result.text, "SPEAKER_1: Background result")
+        self.assertIn("attachment", result.headers["content-disposition"])
+        self.assertEqual(self.client.delete(f"/jobs/{job_id}").status_code, 204)
+        self.assertEqual(self.client.get(f"/jobs/{job_id}").status_code, 404)
+
+    def test_job_results_are_scoped_to_account(self):
+        self.login()
+        with patch.object(api, "_run_pipeline", return_value="Private result"):
+            job_id = self.client.post("/jobs", files={"file": ("voice.wav", b"audio")}).json()["id"]
+            self.wait_for_job(job_id)
+        with patch.dict(os.environ, {"APP_USERNAME": "another-account"}):
+            self.assertEqual(self.client.get("/jobs").json()["jobs"], [])
+            self.assertEqual(self.client.get(f"/jobs/{job_id}").status_code, 404)
+            self.assertEqual(self.client.get(f"/jobs/{job_id}/result").status_code, 404)
+            self.assertEqual(self.client.post(f"/jobs/{job_id}/retry").status_code, 404)
+            self.assertEqual(self.client.delete(f"/jobs/{job_id}").status_code, 404)
+
+    def test_failed_job_can_retry_without_uploading_again(self):
+        self.login()
+        with patch.object(api, "_run_pipeline", side_effect=RuntimeError("private provider error")), patch("job_queue.logger.exception"):
+            job_id = self.client.post("/jobs", files={"file": ("voice.wav", b"audio")}).json()["id"]
+            failed = self.wait_for_job(job_id)
+        self.assertTrue(failed["retryable"])
+        self.assertNotIn("private provider error", str(failed))
+        self.assertEqual(self.client.get(f"/jobs/{job_id}/result").status_code, 409)
+        with patch.object(api, "_run_pipeline", return_value="Retry result"):
+            self.assertEqual(self.client.post(f"/jobs/{job_id}/retry").status_code, 202)
+            self.assertEqual(self.wait_for_job(job_id)["status"], "completed")
+        self.assertEqual(self.client.post(f"/jobs/{job_id}/retry").status_code, 409)
+
+    def test_background_and_legacy_requests_share_the_two_worker_limit(self):
+        self.login()
+        release = threading.Event()
+        two_started = threading.Event()
+        lock = threading.Lock()
+        active = 0
+        peak = 0
+
+        def runner(*args):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == 2:
+                    two_started.set()
+            release.wait(5)
+            with lock:
+                active -= 1
+            return "Transcript"
+
+        with patch.object(api, "_run_pipeline", side_effect=runner), ThreadPoolExecutor(max_workers=1) as pool:
+            try:
+                for _ in range(3):
+                    # These responses must return while both workers are blocked.
+                    response = self.client.post("/jobs", files={"file": ("voice.wav", b"audio")})
+                    self.assertEqual(response.status_code, 202)
+                self.assertTrue(two_started.wait(5))
+                self.assertEqual(self.client.get("/jobs").json()["active"], 2)
+                self.assertEqual(self.client.get("/jobs").json()["queued"], 1)
+                legacy = pool.submit(self.client.post, "/transcribe", files={"file": ("legacy.wav", b"audio")})
+                deadline = time.monotonic() + 3
+                while self.client.get("/jobs").json()["queued"] < 2 and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertEqual(self.client.get("/jobs").json()["queued"], 2)
+                self.assertFalse(legacy.done())
+            finally:
+                release.set()
+            self.assertEqual(legacy.result(timeout=5).status_code, 200)
+        self.assertEqual(peak, 2)
+
+    def test_full_queue_returns_429_without_saving_another_upload(self):
+        self.login()
+        queue = self.client.app.state.jobs
+        queue.stop()
+        queue.max_pending = 2
+        for _ in range(2):
+            self.assertEqual(self.client.post("/jobs", files={"file": ("voice.wav", b"audio")}).status_code, 202)
+        existing = set(queue.uploads.iterdir())
+        response = self.client.post("/jobs", files={"file": ("extra.wav", b"audio")})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "60")
+        self.assertEqual(set(queue.uploads.iterdir()), existing)
 
     def test_setup_preserves_existing_settings(self):
         import setup_login

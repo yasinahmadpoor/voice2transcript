@@ -4,10 +4,20 @@ let previewUrl = null;
 let maxUploadMb = 500;
 let busy = false;
 let activeRequest = null;
-let elapsedTimer = null;
 let toastTimer = null;
 let transcriptFilename = 'transcription.txt';
 let transcriptionDefaults = null;
+let pollTimer = null;
+let pollGeneration = 0;
+let signedIn = false;
+let accountName = '';
+let selectedJobId = null;
+let selectedJob = null;
+let loadedResultId = null;
+let selectionGeneration = 0;
+let recentJobs = [];
+let historySignature = '';
+let refreshTask = null;
 const settingInputs = document.querySelectorAll('[data-transcription-setting]');
 
 function resetSettings() {
@@ -32,6 +42,8 @@ async function errorMessage(response) {
 }
 
 function showLogin(message = '') {
+  signedIn = false;
+  stopPolling();
   $('loading').hidden = true;
   $('login-view').hidden = false;
   $('workspace-view').hidden = true;
@@ -64,6 +76,11 @@ async function openWorkspace() {
   $('account').hidden = false;
   $('header-note').hidden = true;
   $('password').value = '';
+  accountName = data.username;
+  selectedJobId = savedJob();
+  signedIn = true;
+  const generation = ++pollGeneration;
+  await pollJobs(generation);
 }
 
 $('login-form').addEventListener('submit', async (event) => {
@@ -136,23 +153,12 @@ window.addEventListener('drop', (event) => event.preventDefault());
 function setBusy(value) {
   busy = value;
   $('transcribe-button').disabled = value || !selectedFile;
-  $('transcribe-button').textContent = value ? 'Transcribing…' : 'Transcribe recording →';
+  $('transcribe-button').textContent = value ? 'Uploading recording…' : 'Transcribe recording →';
   $('file-input').disabled = value;
   $('remove-file').disabled = value;
   for (const input of settingInputs) input.disabled = value;
   $('reset-settings').disabled = value;
   $('dropzone').classList.toggle('disabled', value);
-  $('processing').hidden = !value;
-  $('transcript-panel').setAttribute('aria-busy', String(value));
-  clearInterval(elapsedTimer);
-  if (value) {
-    const started = Date.now();
-    $('elapsed').textContent = '0:00 elapsed';
-    elapsedTimer = setInterval(() => {
-      const seconds = Math.floor((Date.now() - started) / 1000);
-      $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} elapsed`;
-    }, 1000);
-  }
 }
 
 function updateWordCount() {
@@ -160,46 +166,226 @@ function updateWordCount() {
   $('word-count').textContent = `${text ? text.split(/\s+/u).length : 0} words`;
 }
 
+function savedJob(id) {
+  try {
+    const key = `voice-selected-job:${accountName}`;
+    if (id !== undefined) {
+      if (id) localStorage.setItem(key, id);
+      else localStorage.removeItem(key);
+    }
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function stopPolling() {
+  clearTimeout(pollTimer);
+  ++pollGeneration;
+}
+
+function labelFor(job) {
+  if (job.status === 'queued') return `Queued · #${job.queue_position}`;
+  if (job.interrupted && job.status === 'failed') return 'Interrupted';
+  return { processing: 'Processing', completed: 'Completed', failed: 'Failed' }[job.status];
+}
+
+function renderHistory(jobs) {
+  const signature = JSON.stringify([selectedJobId, jobs]);
+  if (signature === historySignature) return;
+  historySignature = signature;
+  $('jobs-list').replaceChildren();
+  $('jobs-empty').hidden = jobs.length > 0;
+  for (const job of jobs) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'job-row';
+    row.setAttribute('aria-current', String(job.id === selectedJobId));
+    const name = document.createElement('span');
+    name.className = 'job-name';
+    name.textContent = job.filename;
+    const status = document.createElement('span');
+    status.className = 'job-state';
+    status.textContent = labelFor(job);
+    status.setAttribute('data-status', job.status);
+    row.append(name, status);
+    row.addEventListener('click', () => {
+      selectedJobId = job.id;
+      savedJob(job.id);
+      renderHistory(recentJobs);
+      viewJob(job).catch(error => showError('jobs-error', error.message));
+    });
+    $('jobs-list').append(row);
+  }
+}
+
+async function viewJob(job) {
+  const changed = selectedJob?.id !== job?.id;
+  if (changed) {
+    ++selectionGeneration;
+    loadedResultId = null;
+    $('transcript-text').value = '';
+  }
+  selectedJob = job;
+  const pending = job && ['queued', 'processing'].includes(job.status);
+  $('processing').hidden = !pending;
+  $('empty-result').hidden = Boolean(job);
+  $('job-failure').hidden = !job || job.status !== 'failed';
+  $('result').hidden = !job || job.status !== 'completed' || loadedResultId !== job.id;
+  $('result-badge').hidden = !job || job.status !== 'completed';
+  $('job-actions').hidden = !job;
+  $('transcript-panel').setAttribute('aria-busy', String(Boolean(pending)));
+  $('retry-job').hidden = !job || !job.retryable;
+  $('delete-job').disabled = job?.status === 'processing';
+  if (!job) {
+    $('transcript-status').textContent = 'Ready when you are';
+    return;
+  }
+  $('selected-job-note').textContent = `Selected: ${job.filename}`;
+  $('delete-job').textContent = job.status === 'queued' ? 'Cancel queued recording' : 'Remove recording';
+  $('transcript-status').textContent = `${labelFor(job)} · ${job.filename}`;
+  if (pending) {
+    loadedResultId = null;
+    $('processing-title').textContent = job.status === 'queued' ? 'Waiting for a transcription slot' : 'Finding the words…';
+    $('processing-description').textContent = job.status === 'queued'
+      ? `Queue position ${job.queue_position}. Your recording will start when a worker is available. You can leave and return later.`
+      : 'Your job continues if you close this page. Reopen it to check the result.';
+    const started = job.status === 'queued' ? (job.queued_at || job.created_at) : (job.started_at || job.created_at);
+    const seconds = Math.max(0, Math.floor(Date.now() / 1000 - started));
+    $('elapsed').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} ${job.status === 'queued' ? 'waiting' : 'elapsed'}`;
+  } else if (job.status === 'failed') {
+    loadedResultId = null;
+    $('job-error').textContent = `${job.error}${job.retryable ? '' : ' Please upload the recording again.'}`;
+  } else if (job.status === 'completed' && loadedResultId !== job.id) {
+    const generation = selectionGeneration;
+    const response = await fetch(`/jobs/${job.id}/result`);
+    if (!response.ok) throw new Error(await errorMessage(response));
+    const text = await response.text();
+    if (generation !== selectionGeneration || selectedJobId !== job.id || !signedIn) return;
+    $('transcript-text').value = text;
+    $('result-file').textContent = job.filename;
+    transcriptFilename = `${job.filename.replace(/\.[^.]+$/, '') || 'recording'}-transcript.txt`;
+    loadedResultId = job.id;
+    updateWordCount();
+    $('result').hidden = false;
+  }
+}
+
+function refreshJobs(generation = pollGeneration) {
+  if (refreshTask?.generation === generation) return refreshTask.promise;
+  const promise = fetchJobStatus(generation).finally(() => {
+    if (refreshTask?.promise === promise) refreshTask = null;
+  });
+  refreshTask = { generation, promise };
+  return promise;
+}
+
+async function fetchJobStatus(generation) {
+  const response = await fetch('/jobs');
+  if (generation !== pollGeneration || !signedIn) return;
+  if (response.status === 401) {
+    resetWorkspace();
+    showLogin('Your session has expired. Sign in again to see your recordings.');
+    return;
+  }
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const data = await response.json();
+  if (generation !== pollGeneration || !signedIn) return;
+  recentJobs = data.jobs;
+  $('queue-summary').textContent = `${data.active} / ${data.max_active} processing · ${data.queued} queued`;
+  let job = recentJobs.find(item => item.id === selectedJobId);
+  if (!job && selectedJobId) {
+    const older = await fetch(`/jobs/${selectedJobId}`);
+    if (generation !== pollGeneration || !signedIn) return;
+    if (older.ok) job = await older.json();
+    else if (older.status !== 404) throw new Error(await errorMessage(older));
+  }
+  if (!job) job = recentJobs[0] || null;
+  if (generation !== pollGeneration || !signedIn) return;
+  selectedJobId = job?.id || null;
+  savedJob(selectedJobId);
+  renderHistory(recentJobs);
+  await viewJob(job);
+  showError('jobs-error');
+}
+
+async function pollJobs(generation) {
+  try {
+    await refreshJobs(generation);
+  } catch {
+    if (generation === pollGeneration && signedIn) {
+      showError('jobs-error', 'Cannot refresh job status. Your jobs continue on the server. Reconnecting…');
+    }
+  } finally {
+    if (generation === pollGeneration && signedIn) {
+      pollTimer = setTimeout(() => pollJobs(generation), 2000);
+    }
+  }
+}
+
+$('refresh-jobs').addEventListener('click', () => refreshJobs().catch(error => showError('jobs-error', error.message)));
+
+$('retry-job').addEventListener('click', async () => {
+  if (!selectedJob) return;
+  $('retry-job').disabled = true;
+  try {
+    const response = await fetch(`/jobs/${selectedJob.id}/retry`, { method: 'POST' });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    await refreshJobs();
+  } catch (error) {
+    showError('jobs-error', error.message);
+  } finally {
+    $('retry-job').disabled = false;
+  }
+});
+
+$('delete-job').addEventListener('click', async () => {
+  if (!selectedJob) return;
+  $('delete-job').disabled = true;
+  try {
+    const response = await fetch(`/jobs/${selectedJob.id}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    selectedJobId = null;
+    savedJob(null);
+    await refreshJobs();
+  } catch (error) {
+    showError('jobs-error', error.message);
+  } finally {
+    $('delete-job').disabled = selectedJob?.status === 'processing';
+  }
+});
+
 $('transcribe-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!selectedFile || busy) return;
   showError('upload-error');
   const file = selectedFile;
-  const previousTranscript = $('transcript-text').value;
   const form = new FormData($('transcribe-form'));
   // Dragged files may differ from the native input's current FileList.
   form.set('file', file);
-  $('empty-result').hidden = true;
-  $('result').hidden = true;
-  $('result-badge').hidden = true;
-  $('transcript-status').textContent = 'Transcribing your recording';
+  $('transcript-status').textContent = 'Uploading recording…';
   setBusy(true);
   const controller = new AbortController();
   activeRequest = controller;
   try {
-    const response = await fetch('/transcribe', { method: 'POST', body: form, signal: controller.signal });
+    const response = await fetch('/jobs', { method: 'POST', body: form, signal: controller.signal });
     if (response.status === 401) {
       resetWorkspace();
       showLogin('Your session has expired. Please sign in again.');
       return;
     }
     if (!response.ok) throw new Error(await errorMessage(response));
-    const text = await response.text();
-    if (!text.trim()) throw new Error('No transcript was returned. Please try a different recording.');
-    $('transcript-text').value = text;
-    $('result-file').textContent = file.name;
-    transcriptFilename = `${file.name.replace(/\.[^.]+$/, '') || 'recording'}-transcript.txt`;
-    updateWordCount();
-    $('result').hidden = false;
-    $('result-badge').hidden = false;
-    $('transcript-status').textContent = 'Transcription complete';
+    const job = await response.json();
+    if (activeRequest !== controller || !signedIn) return;
+    selectedJobId = job.id;
+    savedJob(job.id);
+    await viewJob(job);
+    setBusy(false);
+    chooseFile(null);
+    await refreshJobs();
   } catch (error) {
     if (error.name !== 'AbortError') {
-      showError('upload-error', error instanceof TypeError ? 'Connection lost. Please check your connection and try again.' : error.message);
-      $('result').hidden = !previousTranscript;
-      $('result-badge').hidden = !previousTranscript;
-      $('empty-result').hidden = Boolean(previousTranscript);
-      $('transcript-status').textContent = 'Unable to transcribe. Please try again.';
+      showError('upload-error', error instanceof TypeError ? 'Connection lost. Check Recent recordings before uploading again; your job may already have been queued.' : error.message);
     }
   } finally {
     if (activeRequest === controller) activeRequest = null;
@@ -208,6 +394,8 @@ $('transcribe-form').addEventListener('submit', async (event) => {
 });
 
 function resetWorkspace() {
+  stopPolling();
+  ++selectionGeneration;
   activeRequest?.abort();
   activeRequest = null;
   setBusy(false);
@@ -218,7 +406,18 @@ function resetWorkspace() {
   $('result').hidden = true;
   $('result-badge').hidden = true;
   $('processing').hidden = true;
+  $('job-failure').hidden = true;
+  $('job-actions').hidden = true;
   $('empty-result').hidden = false;
+  selectedJobId = null;
+  selectedJob = null;
+  loadedResultId = null;
+  recentJobs = [];
+  historySignature = '';
+  $('jobs-list').replaceChildren();
+  $('jobs-empty').hidden = false;
+  $('queue-summary').textContent = '';
+  showError('jobs-error');
   $('transcript-status').textContent = 'Ready when you are';
 }
 

@@ -802,6 +802,113 @@ textarea {
   max-width:270px;
 }
 
+.history-panel {
+  margin-top: 24px;
+}
+
+.history-panel .panel-header {
+  flex-wrap: wrap;
+  gap: 12px;
+  height: auto;
+  min-height: 74px;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.queue-summary {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.jobs-empty {
+  padding: 8px 25px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.jobs-list {
+  display: grid;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.job-row {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: white;
+  padding: 16px 25px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  color: #55596c;
+  font-size: 12px;
+}
+
+.job-row[aria-current="true"] {
+  background: #f5f3ff;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.job-row:hover {
+  background: #f8f7fc;
+}
+
+.job-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-state {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.job-state[data-status="failed"] {
+  color: #a73939;
+}
+
+.job-state[data-status="completed"] {
+  color: #598c75;
+}
+
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 25px;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.history-panel > .error {
+  margin: 16px 25px;
+}
+
+.job-failure {
+  flex: 1;
+  padding: 60px 30px;
+  text-align: center;
+}
+
+.job-failure h3 {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.job-failure p {
+  color: #a73939;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
 .spinner {
   border:3px solid #edeafb;
   border-top-color:var(--accent);

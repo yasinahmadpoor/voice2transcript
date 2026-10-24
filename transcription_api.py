@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
-import logging
+import asyncio
+from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from google import genai
 from starlette.concurrency import run_in_threadpool
 
 from auth import COOKIE_NAME, SESSION_SECONDS, check_login_rate, create_session, delete_session, require_user, verify_credentials
+from job_queue import JobConflict, JobNotFound, JobQueue, QueueFull
 
 from transcription_diarize import (
     DEFAULT_FALLBACK_MODEL,
@@ -45,10 +47,43 @@ API_DEFAULT_CHUNK_MINUTES = 20.0
 API_DEFAULT_LANGUAGE_HINT = "fa"
 
 
-app = FastAPI(title="Gemini Transcription API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_env_defaults()
+    require_binary("ffmpeg")
+    require_binary("ffprobe")
+    queue = JobQueue(
+        Path(os.getenv("JOB_DATA_DIR", str(Path(__file__).resolve().parent / "data"))).resolve(),
+        lambda *args: _run_pipeline(*args),
+        workers=int(os.getenv("TRANSCRIPTION_WORKERS", "2")),
+        max_pending=int(os.getenv("MAX_PENDING_JOBS", "20")),
+    )
+    await run_in_threadpool(queue.start)
+    app.state.jobs = queue
+    try:
+        yield
+    finally:
+        await run_in_threadpool(queue.stop)
+
+
+app = FastAPI(title="Gemini Transcription API", version="1.0.0", lifespan=lifespan)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(JobNotFound)
+async def job_not_found(request: Request, exc: JobNotFound):
+    return JSONResponse({"detail": str(exc)}, status_code=404)
+
+
+@app.exception_handler(JobConflict)
+async def job_conflict(request: Request, exc: JobConflict):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+@app.exception_handler(QueueFull)
+async def queue_full(request: Request, exc: QueueFull):
+    return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": "60"})
 
 
 @app.middleware("http")
@@ -58,7 +93,7 @@ async def protect_requests(request: Request, call_next):
         if origin and origin != str(request.base_url).rstrip("/"):
             return JSONResponse({"detail": "Cross-site requests are not allowed."}, status_code=403)
     # Authenticate before parsing a potentially large multipart upload.
-    if request.url.path.rstrip("/") == "/transcribe":
+    if request.url.path.rstrip("/") in {"/transcribe", "/jobs"} or request.url.path.startswith("/jobs/"):
         try:
             require_user(request)
         except HTTPException as exc:
@@ -139,18 +174,38 @@ def _run_pipeline(
     )
 
 
-@app.on_event("startup")
-def _startup_checks() -> None:
-    load_env_defaults()
-    require_binary("ffmpeg")
-    require_binary("ffprobe")
-
-
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
 
 
+@app.get("/jobs")
+def list_jobs(request: Request, username: str = Depends(require_user), limit: int = Query(50, ge=1, le=100)) -> dict:
+    return request.app.state.jobs.list(username, limit)
+
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str, request: Request, username: str = Depends(require_user)) -> dict:
+    return request.app.state.jobs.get(job_id, username)
+
+
+@app.get("/jobs/{job_id}/result", response_class=PlainTextResponse)
+def job_result(job_id: str, request: Request, username: str = Depends(require_user)) -> PlainTextResponse:
+    return PlainTextResponse(request.app.state.jobs.result(job_id, username), headers={"Content-Disposition": 'attachment; filename="transcription.txt"'})
+
+
+@app.post("/jobs/{job_id}/retry", status_code=202)
+def retry_job(job_id: str, request: Request, username: str = Depends(require_user)) -> dict:
+    return request.app.state.jobs.retry(job_id, username)
+
+
+@app.delete("/jobs/{job_id}", status_code=204)
+def delete_job(job_id: str, request: Request, username: str = Depends(require_user)) -> Response:
+    request.app.state.jobs.delete(job_id, username)
+    return Response(status_code=204)
+
+
+@app.post("/jobs", status_code=202)
 @app.post("/transcribe", response_class=PlainTextResponse)
 async def transcribe(
     request: Request,
@@ -161,7 +216,7 @@ async def transcribe(
     language_hint: str = Form(API_DEFAULT_LANGUAGE_HINT, max_length=100),
     fallback_model: str = Form(DEFAULT_FALLBACK_MODEL),
     prompt: str = Form(API_DEFAULT_PROMPT),
-) -> PlainTextResponse:
+) -> Response:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
 
@@ -173,15 +228,17 @@ async def transcribe(
     if submitted_form.get("fallback_model") == "":
         fallback_model = ""
 
-    suffix = Path(file.filename).suffix or ".bin"
-    tmp_dir = Path("/tmp/opencode") / f"upload_{uuid4().hex}"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    input_path = tmp_dir / f"input{suffix}"
-
+    queue = request.app.state.jobs
+    await run_in_threadpool(queue.check_capacity)
+    job_id = uuid4().hex
+    # ffmpeg detects the format from content; never use a user-supplied path.
+    input_path = queue.uploads / f"{job_id}.media"
+    partial_path = input_path.with_suffix(".part")
+    enqueued = False
     try:
         size = 0
         max_bytes = int(os.getenv("MAX_UPLOAD_MB", "500")) * 1024 * 1024
-        with input_path.open("wb") as f:
+        with partial_path.open("wb") as f:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -192,33 +249,33 @@ async def transcribe(
                 f.write(chunk)
         if size == 0:
             raise HTTPException(400, "The uploaded file is empty.")
-
-        txt_output = await run_in_threadpool(
-            _run_pipeline,
-            input_path,
-            model,
-            chunk_minutes,
-            language_hint,
-            fallback_model,
-            prompt,
+        partial_path.replace(input_path)
+        job = await run_in_threadpool(
+            queue.enqueue, job_id, username, Path(file.filename).name, input_path,
+            {"model": model, "chunk_minutes": chunk_minutes, "language_hint": language_hint, "fallback_model": fallback_model, "prompt": prompt},
         )
+        enqueued = True
+        if request.url.path.rstrip("/") == "/jobs":
+            return JSONResponse(job, status_code=202, headers={"Location": f"/jobs/{job_id}"})
 
+        # Compatibility endpoint: the work still uses the same persistent queue.
+        while job["status"] in {"queued", "processing"}:
+            await asyncio.sleep(0.25)
+            job = await run_in_threadpool(queue.get, job_id, username)
+        if job["status"] != "completed":
+            raise HTTPException(500, job["error"])
         return PlainTextResponse(
-            content=txt_output,
+            content=await run_in_threadpool(queue.result, job_id, username),
             media_type="text/plain",
             headers={"Content-Disposition": 'attachment; filename="transcription.txt"'},
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Transcription failed")
-        raise HTTPException(status_code=500, detail="Transcription failed. Check that the file contains playable audio and try again. If it continues, check the server logs and Gemini API configuration.") from e
     finally:
         await file.close()
-        try:
-            if input_path.exists():
-                input_path.unlink()
-            if tmp_dir.exists():
-                tmp_dir.rmdir()
-        except Exception:
-            pass
+        partial_path.unlink(missing_ok=True)
+        if not enqueued:
+            # A cancelled HTTP request may have committed its job already.
+            # Never remove an upload that belongs to a persisted queue entry.
+            try:
+                queue.get(job_id, username)
+            except JobNotFound:
+                input_path.unlink(missing_ok=True)

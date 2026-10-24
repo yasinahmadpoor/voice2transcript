@@ -10,4 +10,8 @@ services:
       - .env
     volumes:
       - ./outputs:/app/outputs
+      - transcription-data:/app/data
     restart: unless-stopped
+
+volumes:
+  transcription-data:
