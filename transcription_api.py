@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -205,6 +205,23 @@ def delete_job(job_id: str, request: Request, username: str = Depends(require_us
     return Response(status_code=204)
 
 
+async def respond_to_job(job: dict, request: Request, username: str) -> Response:
+    job_id = job["id"]
+    if request.url.path.rstrip("/") == "/jobs":
+        return JSONResponse(job, status_code=202, headers={"Location": f"/jobs/{job_id}"})
+    queue = request.app.state.jobs
+    # Compatibility endpoint: work uses the same persistent queue.
+    while job["status"] in {"queued", "processing"}:
+        await asyncio.sleep(0.25)
+        job = await run_in_threadpool(queue.get, job_id, username)
+    if job["status"] != "completed":
+        raise HTTPException(500, job["error"])
+    return PlainTextResponse(
+        content=await run_in_threadpool(queue.result, job_id, username),
+        headers={"Content-Disposition": 'attachment; filename="transcription.txt"'},
+    )
+
+
 @app.post("/jobs", status_code=202)
 @app.post("/transcribe", response_class=PlainTextResponse)
 async def transcribe(
@@ -216,6 +233,7 @@ async def transcribe(
     language_hint: str = Form(API_DEFAULT_LANGUAGE_HINT, max_length=100),
     fallback_model: str = Form(DEFAULT_FALLBACK_MODEL),
     prompt: str = Form(API_DEFAULT_PROMPT),
+    idempotency_key: str | None = Header(None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
 ) -> Response:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
@@ -229,6 +247,11 @@ async def transcribe(
         fallback_model = ""
 
     queue = request.app.state.jobs
+    if idempotency_key:
+        existing = await run_in_threadpool(queue.find_request, username, idempotency_key)
+        if existing is not None:
+            await file.close()
+            return await respond_to_job(existing, request, username)
     await run_in_threadpool(queue.check_capacity)
     job_id = uuid4().hex
     # ffmpeg detects the format from content; never use a user-supplied path.
@@ -253,22 +276,13 @@ async def transcribe(
         job = await run_in_threadpool(
             queue.enqueue, job_id, username, Path(file.filename).name, input_path,
             {"model": model, "chunk_minutes": chunk_minutes, "language_hint": language_hint, "fallback_model": fallback_model, "prompt": prompt},
+            idempotency_key,
         )
         enqueued = True
-        if request.url.path.rstrip("/") == "/jobs":
-            return JSONResponse(job, status_code=202, headers={"Location": f"/jobs/{job_id}"})
-
-        # Compatibility endpoint: the work still uses the same persistent queue.
-        while job["status"] in {"queued", "processing"}:
-            await asyncio.sleep(0.25)
-            job = await run_in_threadpool(queue.get, job_id, username)
-        if job["status"] != "completed":
-            raise HTTPException(500, job["error"])
-        return PlainTextResponse(
-            content=await run_in_threadpool(queue.result, job_id, username),
-            media_type="text/plain",
-            headers={"Content-Disposition": 'attachment; filename="transcription.txt"'},
-        )
+        if job["id"] != job_id:
+            # Another request with the same retry key committed first.
+            input_path.unlink(missing_ok=True)
+        return await respond_to_job(job, request, username)
     finally:
         await file.close()
         partial_path.unlink(missing_ok=True)

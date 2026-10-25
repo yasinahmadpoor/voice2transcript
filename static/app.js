@@ -20,7 +20,9 @@ $('theme-toggle').addEventListener('click', () => {
 });
 updateThemeToggle();
 
-let selectedFile = null;
+let selectedFiles = [];
+let previewEntryId = null;
+let uploadGeneration = 0;
 let previewUrl = null;
 let maxUploadMb = 500;
 let busy = false;
@@ -125,35 +127,134 @@ $('login-form').addEventListener('submit', async (event) => {
   }
 });
 
-function chooseFile(file) {
-  if (busy) return;
-  showError('upload-error');
-  if (file && (file.size === 0 || file.size > maxUploadMb * 1024 * 1024)) {
-    showError('upload-error', file.size === 0 ? 'This file is empty. Choose a recording with audio.' : `Choose a file smaller than ${maxUploadMb} MB.`);
-    $('file-input').value = '';
-    return;
-  }
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  previewUrl = null;
-  selectedFile = file || null;
-  $('selected-file').hidden = !file;
-  $('audio-preview').hidden = !file;
-  $('audio-preview').pause();
-  $('audio-preview').removeAttribute('src');
-  if (file) {
-    $('file-name').textContent = file.name;
-    $('file-size').textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-    previewUrl = URL.createObjectURL(file);
-    $('audio-preview').src = previewUrl;
-  } else {
-    $('file-input').value = '';
-  }
+function previewFile(entry) {
+  if (!entry?.file || entry.status === 'invalid') return;
+  clearPreview();
+  previewEntryId = entry.id;
+  previewUrl = URL.createObjectURL(entry.file);
+  $('audio-preview').src = previewUrl;
+  $('audio-preview').hidden = false;
+  $('preview-name').textContent = `Preview: ${entry.name}`;
+  $('preview-name').hidden = false;
   $('audio-preview').load();
-  $('transcribe-button').disabled = !selectedFile;
 }
 
-$('file-input').addEventListener('change', (event) => chooseFile(event.target.files[0]));
-$('remove-file').addEventListener('click', () => chooseFile(null));
+function clearPreview() {
+  $('audio-preview').pause();
+  $('audio-preview').removeAttribute('src');
+  $('audio-preview').hidden = true;
+  $('preview-name').hidden = true;
+  $('audio-preview').load();
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = null;
+  previewEntryId = null;
+}
+
+function pendingFiles() {
+  return selectedFiles.filter(entry => ['ready', 'failed'].includes(entry.status));
+}
+
+function updateUploadButton() {
+  const count = pendingFiles().length;
+  $('transcribe-button').disabled = busy || count === 0;
+  if (busy) return;
+  const retry = count > 0 && pendingFiles().every(entry => entry.status === 'failed');
+  $('transcribe-button').textContent = count
+    ? `${retry ? 'Retry' : 'Transcribe'} ${count} recording${count === 1 ? '' : 's'} →`
+    : 'Transcribe recordings →';
+}
+
+function renderFiles() {
+  $('batch-review').hidden = selectedFiles.length === 0;
+  const total = selectedFiles.reduce((sum, entry) => sum + entry.size, 0);
+  $('batch-summary').textContent = `${selectedFiles.length} recording${selectedFiles.length === 1 ? '' : 's'} · ${(total / (1024 * 1024)).toFixed(2)} MB`;
+  $('file-list').replaceChildren();
+  for (const entry of selectedFiles) {
+    const row = document.createElement('div');
+    row.className = 'batch-file';
+    row.setAttribute('role', 'listitem');
+    const info = document.createElement('div');
+    info.className = 'file-info';
+    const name = document.createElement('strong');
+    name.textContent = entry.name;
+    const status = document.createElement('span');
+    status.className = 'file-state';
+    status.setAttribute('data-status', entry.status);
+    const label = {ready:'Ready',invalid:'Invalid file',uploading:'Uploading…',accepted:'Submitted',failed:'Upload failed'}[entry.status];
+    status.textContent = `${(entry.size / (1024 * 1024)).toFixed(2)} MB · ${label}`;
+    info.append(name, status);
+    if (entry.message) {
+      const message = document.createElement('span');
+      message.className = 'file-message';
+      message.textContent = entry.message;
+      info.append(message);
+    }
+    row.append(info);
+    if (entry.jobId) {
+      const view = document.createElement('button');
+      view.type = 'button';
+      view.className = 'secondary-button';
+      view.textContent = 'View';
+      view.setAttribute('aria-label', `View job for ${entry.name}`);
+      view.addEventListener('click', () => {
+        selectedJobId = entry.jobId;
+        savedJob(entry.jobId);
+        refreshJobs().catch(error => showError('jobs-error', error.message));
+      });
+      row.append(view);
+    } else if (entry.file && entry.status !== 'invalid') {
+      const preview = document.createElement('button');
+      preview.type = 'button';
+      preview.className = 'secondary-button';
+      preview.textContent = 'Preview';
+      preview.setAttribute('aria-label', `Preview ${entry.name}`);
+      preview.addEventListener('click', () => previewFile(entry));
+      row.append(preview);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'icon-button';
+    remove.textContent = '×';
+    remove.disabled = busy;
+    remove.setAttribute('aria-label', `Remove ${entry.name} from upload list`);
+    remove.addEventListener('click', () => {
+      if (busy) return;
+      if (previewEntryId === entry.id) clearPreview();
+      selectedFiles = selectedFiles.filter(item => item.id !== entry.id);
+      $('batch-progress').textContent = '';
+      renderFiles();
+    });
+    row.append(remove);
+    $('file-list').append(row);
+  }
+  updateUploadButton();
+}
+
+function addFiles(files) {
+  if (busy) return;
+  showError('upload-error');
+  for (const file of Array.from(files || [])) {
+    const duplicate = selectedFiles.some(entry => entry.status !== 'accepted' && entry.file === file);
+    if (duplicate) continue;
+    const message = file.size === 0 ? 'This file is empty.' : file.size > maxUploadMb * 1024 * 1024 ? `Exceeds the ${maxUploadMb} MB per-file limit.` : '';
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+    selectedFiles.push({id,file,name:file.name,size:file.size,status:message?'invalid':'ready',message,jobId:null});
+  }
+  // Retain File objects in the batch and allow selecting the same file again.
+  $('file-input').value = '';
+  $('batch-progress').textContent = '';
+  renderFiles();
+  if (!previewEntryId) previewFile(selectedFiles.find(entry => entry.status === 'ready'));
+}
+
+$('file-input').addEventListener('change', (event) => addFiles(event.target.files));
+$('clear-files').addEventListener('click', () => {
+  if (busy) return;
+  selectedFiles = [];
+  clearPreview();
+  $('batch-progress').textContent = '';
+  renderFiles();
+});
 for (const name of ['dragenter', 'dragover']) {
   $('dropzone').addEventListener(name, (event) => {
     event.preventDefault();
@@ -164,7 +265,7 @@ for (const name of ['dragleave', 'drop']) {
   $('dropzone').addEventListener(name, (event) => {
     event.preventDefault();
     $('dropzone').classList.remove('dragover');
-    if (name === 'drop') chooseFile(event.dataTransfer.files[0]);
+    if (name === 'drop') addFiles(event.dataTransfer.files);
   });
 }
 // Do not navigate away if a recording misses the drop target.
@@ -173,13 +274,12 @@ window.addEventListener('drop', (event) => event.preventDefault());
 
 function setBusy(value) {
   busy = value;
-  $('transcribe-button').disabled = value || !selectedFile;
-  $('transcribe-button').textContent = value ? 'Uploading recording…' : 'Transcribe recording →';
   $('file-input').disabled = value;
-  $('remove-file').disabled = value;
+  $('clear-files').disabled = value;
   for (const input of settingInputs) input.disabled = value;
   $('reset-settings').disabled = value;
   $('dropzone').classList.toggle('disabled', value);
+  renderFiles();
 }
 
 function updateWordCount() {
@@ -378,49 +478,102 @@ $('delete-job').addEventListener('click', async () => {
 
 $('transcribe-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!selectedFile || busy) return;
+  const batch = pendingFiles();
+  if (busy || !batch.length) return;
   showError('upload-error');
-  const file = selectedFile;
-  const form = new FormData($('transcribe-form'));
-  // Dragged files may differ from the native input's current FileList.
-  form.set('file', file);
-  $('transcript-status').textContent = 'Uploading recording…';
+  // Snapshot settings once, before controls are disabled, for the whole batch.
+  const settings = [...new FormData($('transcribe-form')).entries()].filter(([name]) => name !== 'file');
+  const generation = ++uploadGeneration;
   setBusy(true);
   const controller = new AbortController();
   activeRequest = controller;
+  let selectedFirst = false;
   try {
-    const response = await fetch('/jobs', { method: 'POST', body: form, signal: controller.signal });
-    if (response.status === 401) {
-      resetWorkspace();
-      showLogin('Your session has expired. Please sign in again.');
-      return;
-    }
-    if (!response.ok) throw new Error(await errorMessage(response));
-    const job = await response.json();
-    if (activeRequest !== controller || !signedIn) return;
-    selectedJobId = job.id;
-    savedJob(job.id);
-    await viewJob(job);
-    setBusy(false);
-    chooseFile(null);
-    await refreshJobs();
-  } catch (error) {
-    if (error.name !== 'AbortError') {
-      showError('upload-error', error instanceof TypeError ? 'Connection lost. Check Recent recordings before uploading again; your job may already have been queued.' : error.message);
+    for (const [index, entry] of batch.entries()) {
+      if (generation !== uploadGeneration || !signedIn) return;
+      entry.status = 'uploading';
+      entry.message = '';
+      $('transcribe-button').textContent = `Uploading ${index + 1} of ${batch.length}…`;
+      $('batch-progress').textContent = `Uploading ${index + 1} of ${batch.length}: ${entry.name}`;
+      renderFiles();
+      const form = new FormData();
+      for (const [name, value] of settings) form.append(name, value);
+      form.set('file', entry.file);
+      try {
+        const response = await fetch('/jobs', {
+          method:'POST',body:form,signal:controller.signal,
+          headers:{'Idempotency-Key':entry.id},
+        });
+        if (generation !== uploadGeneration || !signedIn) return;
+        if (response.status === 401) {
+          resetWorkspace();
+          showLogin('Your session has expired. Sign in again to see submitted jobs, then select any remaining files.');
+          return;
+        }
+        if (!response.ok) {
+          entry.status = 'failed';
+          entry.message = await errorMessage(response);
+          if (response.status === 429) {
+            for (const remaining of batch.slice(index + 1)) {
+              remaining.status = 'failed';
+              remaining.message = 'Not uploaded: the queue is full. Retry when space is available.';
+            }
+            break;
+          }
+          continue;
+        }
+        const job = await response.json();
+        if (generation !== uploadGeneration || !signedIn) return;
+        entry.jobId = job.id;
+        entry.status = 'accepted';
+        if (previewEntryId === entry.id) clearPreview();
+        entry.file = null;
+        if (!selectedFirst) {
+          selectedFirst = true;
+          selectedJobId = job.id;
+          savedJob(job.id);
+          await viewJob(job).catch(error => showError('jobs-error', error.message));
+        }
+      } catch (error) {
+        if (error.name === 'AbortError' || generation !== uploadGeneration) return;
+        entry.status = 'failed';
+        entry.message = 'Upload could not be confirmed. Retry upload to safely check or resume this file.';
+        for (const remaining of batch.slice(index + 1)) {
+          remaining.status = 'failed';
+          remaining.message = 'Not uploaded after a connection error. Retry when connected.';
+        }
+        break;
+      } finally {
+        if (generation === uploadGeneration) renderFiles();
+      }
     }
   } finally {
-    if (activeRequest === controller) activeRequest = null;
-    setBusy(false);
+    if (generation === uploadGeneration) {
+      activeRequest = null;
+      setBusy(false);
+      const accepted = selectedFiles.filter(entry => entry.status === 'accepted').length;
+      const failed = selectedFiles.filter(entry => entry.status === 'failed').length;
+      const invalid = selectedFiles.filter(entry => entry.status === 'invalid').length;
+      $('batch-progress').textContent = `${accepted} submitted${failed ? ` · ${failed} upload failed — retry below` : ''}${invalid ? ` · ${invalid} invalid file${invalid === 1 ? '' : 's'}` : ''}.`;
+      if (!previewEntryId) previewFile(pendingFiles()[0]);
+    }
+  }
+  if (generation === uploadGeneration && signedIn) {
+    await refreshJobs().catch(error => showError('jobs-error', error.message));
   }
 });
 
 function resetWorkspace() {
   stopPolling();
+  ++uploadGeneration;
   ++selectionGeneration;
   activeRequest?.abort();
   activeRequest = null;
+  selectedFiles = [];
   setBusy(false);
-  chooseFile(null);
+  clearPreview();
+  $('file-input').value = '';
+  $('batch-progress').textContent = '';
   $('transcript-text').value = '';
   $('result-file').textContent = '';
   $('word-count').textContent = '';

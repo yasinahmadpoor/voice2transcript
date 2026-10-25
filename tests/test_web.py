@@ -274,6 +274,58 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.headers["retry-after"], "60")
         self.assertEqual(set(queue.uploads.iterdir()), existing)
 
+    def test_upload_retry_key_returns_existing_job_without_running_twice(self):
+        self.login()
+        headers = {"Idempotency-Key": "same-recording-retry"}
+        with patch.object(api, "_run_pipeline", return_value="Transcript") as runner:
+            first = self.client.post("/jobs", files={"file": ("voice.wav", b"audio")}, headers=headers)
+            job_id = first.json()["id"]
+            self.wait_for_job(job_id)
+            second = self.client.post("/jobs", files={"file": ("voice.wav", b"audio")}, headers=headers)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(second.json()["id"], job_id)
+        self.assertEqual(runner.call_count, 1)
+        self.assertEqual(len(self.client.get("/jobs").json()["jobs"]), 1)
+
+    def test_concurrent_duplicate_uploads_create_only_one_job(self):
+        self.login()
+        queue = self.client.app.state.jobs
+        barrier = threading.Barrier(2)
+
+        def simultaneous_lookup(*args):
+            barrier.wait(timeout=5)
+            return None
+
+        def upload():
+            return self.client.post("/jobs", files={"file": ("voice.wav", b"audio")}, headers={"Idempotency-Key": "concurrent-retry"})
+
+        with patch.object(queue, "find_request", side_effect=simultaneous_lookup), patch.object(api, "_run_pipeline", return_value="Transcript") as runner, ThreadPoolExecutor(max_workers=2) as pool:
+            first, second = list(pool.map(lambda _: upload(), range(2)))
+            job_id = first.json()["id"]
+            self.wait_for_job(job_id)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(second.json()["id"], job_id)
+        self.assertEqual(runner.call_count, 1)
+        self.assertEqual(len(self.client.get("/jobs").json()["jobs"]), 1)
+        deadline = time.monotonic() + 2
+        while list(queue.uploads.iterdir()) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(list(queue.uploads.iterdir()), [])
+
+    def test_accepted_retry_key_still_works_when_queue_is_full(self):
+        self.login()
+        queue = self.client.app.state.jobs
+        queue.stop()
+        queue.max_pending = 2
+        first = self.client.post("/jobs", files={"file": ("one.wav", b"audio")}, headers={"Idempotency-Key": "one"})
+        self.client.post("/jobs", files={"file": ("two.wav", b"audio")}, headers={"Idempotency-Key": "two"})
+        repeated = self.client.post("/jobs", files={"file": ("one.wav", b"audio")}, headers={"Idempotency-Key": "one"})
+        self.assertEqual(repeated.status_code, 202)
+        self.assertEqual(first.json()["id"], repeated.json()["id"])
+        self.assertEqual(len(list(queue.uploads.iterdir())), 2)
+
     def test_setup_preserves_existing_settings(self):
         import setup_login
 

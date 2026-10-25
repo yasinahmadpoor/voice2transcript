@@ -51,8 +51,11 @@ class JobQueue:
                 input_path TEXT NOT NULL, settings TEXT NOT NULL,
                 status TEXT NOT NULL, created_at REAL NOT NULL, queued_at REAL NOT NULL,
                 started_at REAL, finished_at REAL, transcript TEXT, error TEXT,
-                interrupted INTEGER NOT NULL DEFAULT 0
+                interrupted INTEGER NOT NULL DEFAULT 0, request_key TEXT
             )""")
+            if "request_key" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
+                db.execute("ALTER TABLE jobs ADD COLUMN request_key TEXT")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_request_key ON jobs(owner, request_key) WHERE request_key IS NOT NULL")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(status, queued_at, sequence)")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_owner ON jobs(owner, sequence)")
         self.database.chmod(0o600)
@@ -117,14 +120,23 @@ class JobQueue:
         with self._db() as db:
             self._check_capacity(db)
 
-    def enqueue(self, job_id: str, owner: str, filename: str, path: Path, settings: dict) -> dict:
+    def find_request(self, owner: str, request_key: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute(self._select + " WHERE owner=? AND request_key=?", (owner, request_key)).fetchone()
+        return self._public(row) if row is not None else None
+
+    def enqueue(self, job_id: str, owner: str, filename: str, path: Path, settings: dict, request_key: str | None = None) -> dict:
         now = time.time()
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            if request_key is not None:
+                existing = db.execute(self._select + " WHERE owner=? AND request_key=?", (owner, request_key)).fetchone()
+                if existing is not None:
+                    return self._public(existing)
             self._check_capacity(db)
             db.execute(
-                "INSERT INTO jobs(id, owner, filename, input_path, settings, status, created_at, queued_at) VALUES(?,?,?,?,?,'queued',?,?)",
-                (job_id, owner, filename, str(path), json.dumps(settings), now, now),
+                "INSERT INTO jobs(id, owner, filename, input_path, settings, status, created_at, queued_at, request_key) VALUES(?,?,?,?,?,'queued',?,?,?)",
+                (job_id, owner, filename, str(path), json.dumps(settings), now, now, request_key),
             )
         self._wake.set()
         return self.get(job_id, owner)

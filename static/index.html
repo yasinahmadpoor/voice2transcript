@@ -50,15 +50,20 @@
       <div class="workspace-heading"><div><span class="eyebrow"><span class="status-dot"></span> YOUR WORDS, IN WRITING</span><h1 id="workspace-heading">Make room for <span class="accent">the conversation.</span></h1><p class="muted">Drop in a recording. Leave with a transcript.</p></div><span class="workspace-badge">AUDIO & VIDEO</span></div>
       <div class="workspace-grid">
         <section class="panel input-panel" aria-labelledby="upload-heading">
-          <div class="panel-header"><span class="step-number">01</span><h2 id="upload-heading">Add your recording</h2></div>
+          <div class="panel-header"><span class="step-number">01</span><h2 id="upload-heading">Add your recordings</h2></div>
           <form id="transcribe-form">
             <label id="dropzone" class="dropzone" for="file-input">
               <span class="upload-icon" aria-hidden="true">↑</span>
-              <strong>Drop your file here</strong><span>or <span class="browse-link">browse files</span></span>
-              <small>Audio or video · up to <span id="upload-limit">500</span> MB</small>
-              <input id="file-input" name="file" type="file" accept="audio/*,video/*,.m4a,.mkv,.ogg,.flac,.opus,.aac,.wma,.aiff,.webm,.mp4,.mp3,.wav,.mov" aria-label="Choose an audio or video file">
+              <strong>Drop your files here</strong><span>or <span class="browse-link">browse files</span></span>
+              <small>Audio or video · up to <span id="upload-limit">500</span> MB each</small>
+              <input id="file-input" name="file" type="file" multiple accept="audio/*,video/*,.m4a,.mkv,.ogg,.flac,.opus,.aac,.wma,.aiff,.webm,.mp4,.mp3,.wav,.mov" aria-label="Choose audio or video files">
             </label>
-            <div id="selected-file" class="selected-file" hidden><span class="file-symbol" aria-hidden="true">♫</span><div class="file-info"><strong id="file-name"></strong><span id="file-size" class="muted"></span></div><button id="remove-file" class="icon-button" type="button" aria-label="Remove selected file">×</button></div>
+            <div id="batch-review" class="batch-review" hidden>
+              <div class="batch-heading"><span id="batch-summary"></span><button id="clear-files" class="quiet-button" type="button">Clear list</button></div>
+              <div id="file-list" class="file-list" role="list" aria-label="Selected recordings"></div>
+              <p id="batch-progress" class="field-help" role="status" aria-live="polite"></p>
+            </div>
+            <p id="preview-name" class="preview-name" hidden></p>
             <audio id="audio-preview" controls hidden preload="metadata" aria-label="Preview your recording"></audio>
             <div class="field-heading"><label for="language">Recording language</label><span>Optional hint</span></div>
             <input id="language" name="language_hint" list="language-options" maxlength="100" placeholder="Leave blank to auto-detect" aria-describedby="language-help" data-transcription-setting>
@@ -82,8 +87,8 @@
               </div>
             </details>
             <p id="upload-error" class="error" role="alert" hidden></p>
-            <button id="transcribe-button" class="primary-button" type="submit" disabled>Transcribe recording <span aria-hidden="true">→</span></button>
-            <p class="upload-note">Your recording is sent to Gemini. Jobs continue if you close this page. Successful uploads are removed after transcription.</p>
+            <button id="transcribe-button" class="primary-button" type="submit" disabled>Transcribe recordings <span aria-hidden="true">→</span></button>
+            <p class="upload-note">Settings apply to every file in this batch. Keep this page open until uploads finish. Submitted jobs continue if you leave.</p>
           </form>
         </section>
 

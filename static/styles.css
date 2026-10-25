@@ -586,19 +586,64 @@ input::placeholder {
   cursor:pointer;
 }
 
-.selected-file {
-  margin-top:13px;
-  display:flex;
-  align-items:center;
-  gap:12px;
-  border:1px solid var(--line);
-  border-radius:8px;
-  padding:12px;
+.batch-review {
+  margin-top:14px;
 }
 
-.file-symbol {
+.batch-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  color:var(--muted);
+  font-size:11px;
+}
+
+.file-list {
+  max-height:300px;
+  overflow-y:auto;
+  border:1px solid var(--line);
+  border-radius:8px;
+}
+
+.batch-file {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:12px;
+  border-bottom:1px solid var(--soft-line);
+}
+
+.batch-file:last-child {
+  border-bottom:0;
+}
+
+.file-state,.file-message {
+  display:block;
+  margin-top:5px;
+  font-size:10px;
+  line-height:1.6;
+  color:var(--muted);
+  overflow-wrap:anywhere;
+}
+
+.file-state[data-status="invalid"],.file-state[data-status="failed"],.file-message {
+  color:var(--error);
+}
+
+.file-state[data-status="accepted"] {
+  color:var(--success);
+}
+
+.file-state[data-status="uploading"] {
   color:var(--accent);
-  font-size:23px;
+}
+
+.preview-name {
+  margin:14px 0 0;
+  color:var(--muted);
+  font-size:11px;
+  overflow-wrap:anywhere;
 }
 
 .file-info {

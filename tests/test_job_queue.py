@@ -1,4 +1,5 @@
 import tempfile
+import sqlite3
 import threading
 import time
 import unittest
@@ -157,3 +158,22 @@ class QueueTests(unittest.TestCase):
         self.wait(lambda: queue.get(job["id"], "owner")["status"] == "completed")
         self.assertEqual(calls, [("primary", 0, "", "", "Verbatim")] * 2)
         self.assertEqual(queue.result(job["id"], "owner"), "Retried transcript")
+
+    def test_existing_database_is_migrated_and_retry_keys_survive_reopening(self):
+        database = self.directory / 'jobs.sqlite3'
+        with sqlite3.connect(database) as db:
+            db.execute("""CREATE TABLE jobs (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT UNIQUE NOT NULL, owner TEXT NOT NULL, filename TEXT NOT NULL,
+                input_path TEXT NOT NULL, settings TEXT NOT NULL, status TEXT NOT NULL,
+                created_at REAL NOT NULL, queued_at REAL NOT NULL, started_at REAL,
+                finished_at REAL, transcript TEXT, error TEXT, interrupted INTEGER NOT NULL DEFAULT 0
+            )""")
+        queue = self.queue()
+        job = self.enqueue(queue)
+        with queue._db() as db:
+            db.execute("UPDATE jobs SET request_key='persistent-key' WHERE id=?", (job['id'],))
+        reopened = self.queue()
+        self.assertEqual(reopened.find_request('owner', 'persistent-key')['id'], job['id'])
+        self.assertIsNone(reopened.find_request('another-owner', 'persistent-key'))
+        self.assertIsNone(reopened.find_request('owner', 'missing-key'))

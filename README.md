@@ -4,6 +4,10 @@ A FastAPI app that transcribes audio or video with Gemini and adds speaker label
 
 The interface starts in dark mode. Use the theme button in the header to switch between dark and light; your choice is saved in the browser and applies to both the login page and workspace.
 
+Select or drop multiple audio/video files to create a batch. Review sizes, preview recordings, and remove individual files before submitting. Shared transcription settings are captured once for the batch. Files upload sequentially; each accepted file becomes a separate background job, while two transcriptions can run at once. The per-file size limit still applies.
+
+Each file shows its upload status. Invalid files are skipped, and failed files can be retried without resubmitting successful ones. If the queue fills or the connection drops, remaining uploads stop and can be retried later. Retry keys prevent duplicate jobs when a server response is lost. Clearing the upload list does not cancel jobs already submitted. Keep the page open until uploads finish; file selections and unsubmitted uploads are not preserved after refreshing or closing it.
+
 ## Run locally
 
 Requires Python 3.10+ and `ffmpeg` / `ffprobe` on your PATH.
@@ -59,6 +63,8 @@ Recordings are sent to Gemini. Successful recordings are deleted locally after t
 | `DELETE /jobs/{id}` | Cancel a queued job or remove a completed/failed one; HTTP 409 while processing. |
 
 `POST /jobs` accepts the same multipart fields as the legacy API: `file`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Blank language enables auto-detection, blank fallback disables fallback, and chunk length `0` disables splitting.
+
+An optional `Idempotency-Key` header (1–128 letters, digits, underscores, or hyphens) identifies one recording upload. Reusing it for the same account returns the existing job, even if the queue is full, without transcribing it again. Keys persist with the job record; removing the job also removes its key. The frontend generates one key per selected file and reuses it for upload retries. The existing SQLite database is migrated automatically when the updated server starts.
 
 `POST /transcribe` remains compatible: it submits through the same persistent queue, waits for completion, and returns a plain-text attachment. It still needs a long HTTP connection and may hit proxy timeouts; use `/jobs` for background processing. Disconnecting does not cancel an accepted job.
 
