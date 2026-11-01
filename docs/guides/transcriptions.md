@@ -20,7 +20,7 @@ Select a queued or running recording in **Recent recordings**, then click **Canc
 
 Cancellation closes the active provider connection and stops local audio conversion and transcription. A provider may still finish or charge for a request it already received.
 
-Successful recordings are deleted locally after the transcript is committed. Failed, interrupted, and cancelled recordings are retained for retry for 24 hours, with cleanup running at startup and about once per minute. After that, upload the file again. **Remove recording** deletes a job and its stored result; running or cancelling jobs must stop before removal.
+Successful recordings are deleted locally after the transcript is committed. Failed, interrupted, and cancelled recordings are retained for retry for 24 hours, with cleanup running at startup and about once per minute. After that, upload the file again. **Remove recording** opens a confirmation dialog naming the recording. Choose **Delete transcription** to permanently remove the job and its stored result, or **Cancel** to keep it. Running or cancelling jobs must stop before removal.
 
 ## Related documentation
 

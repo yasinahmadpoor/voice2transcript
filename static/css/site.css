@@ -1109,6 +1109,65 @@ textarea {
   border:0;
 }
 
+.confirmation-dialog {
+  width:min(440px, calc(100% - 32px));
+  padding:26px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--surface);
+  color:var(--text);
+  box-shadow:0 16px 60px #0004;
+}
+
+.confirmation-dialog::backdrop {
+  background:#0009;
+}
+
+.confirmation-dialog h2 {
+  margin:0 0 16px;
+  font-size:20px;
+  font-weight:550;
+}
+
+.confirmation-dialog p {
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.7;
+}
+
+.confirmation-dialog .dialog-filename {
+  color:var(--text);
+  font-weight:550;
+  overflow-wrap:anywhere;
+}
+
+.confirmation-dialog .error {
+  color:var(--error);
+}
+
+.dialog-actions {
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  gap:10px;
+  margin-top:24px;
+}
+
+.danger-button {
+  min-height:40px;
+  padding:10px 14px;
+  border:1px solid #b42332;
+  border-radius:7px;
+  background:#b42332;
+  color:#fff;
+  font-size:12px;
+}
+
+.danger-button:hover {
+  background:#981d2a;
+  border-color:#981d2a;
+}
+
 @keyframes spin {
   to {
     transform:rotate(360deg);

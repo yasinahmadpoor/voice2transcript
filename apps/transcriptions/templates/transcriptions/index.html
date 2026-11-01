@@ -110,5 +110,15 @@
 {% endblock %}
 
 {% block extra_body %}
+  <dialog id="delete-dialog" class="confirmation-dialog" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-description delete-dialog-filename">
+    <h2 id="delete-dialog-title">Delete transcription?</h2>
+    <p id="delete-dialog-filename" class="dialog-filename"><bdi id="delete-job-name"></bdi></p>
+    <p id="delete-dialog-description">This will permanently remove this recording and any transcript from your history. This cannot be undone.</p>
+    <p id="delete-dialog-error" class="error" role="alert" hidden></p>
+    <div class="dialog-actions">
+      <button id="cancel-delete-job" class="secondary-button" type="button" autofocus>Cancel</button>
+      <button id="confirm-delete-job" class="danger-button" type="button">Delete transcription</button>
+    </div>
+  </dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 {% endblock %}

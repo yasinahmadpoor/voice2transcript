@@ -16,7 +16,7 @@ const defaults = {
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
 
-async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, theme = null } = {}) {
+async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, onDelete = null, theme = null } = {}) {
   const elements = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -25,6 +25,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   let currentAccount = {username:'tester',user_id:42};
   const retryKeys = new Map();
   const uploadHeaders = [];
+  const deletions = [];
   const storage = new Map(saved ? [['voice-selected-job:42', saved]] : []);
   if (theme) storage.set('voice-theme', theme);
   function get(id) {
@@ -33,7 +34,9 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
         id, value: '', hidden: false, disabled: false, listeners: {},
         addEventListener(event, callback) { this.listeners[event] = callback; },
         classList: { toggle() {}, add() {}, remove() {} },
-        pause() {}, load() {}, focus() {}, select() {}, scrollIntoView() {},
+        pause() {}, load() {}, focus() { this.focused = true; }, select() {}, scrollIntoView() {},
+        showModal() { this.open = true; },
+        close() { this.open = false; this.listeners.close?.(); },
         removeAttribute(name) { delete this.attributes[name]; },
         attributes: {},
         setAttribute(name, value) { this.attributes[name] = String(value); },
@@ -110,6 +113,11 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
         return {ok:true,json:async () => structuredClone(job)};
       }
       if (options?.method === 'DELETE') {
+        deletions.push(id);
+        if (onDelete) {
+          const response = await onDelete(job, options);
+          if (response) return response;
+        }
         serverJobs = serverJobs.filter(item => item.id !== id);
         return {ok:true};
       }
@@ -120,7 +128,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   vm.runInContext(languageSource, context);
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { get, inputs, requests, timers, storage, uploadHeaders, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
+  return { get, inputs, requests, timers, storage, uploadHeaders, deletions, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
 }
 
 test('shared theme defaults to dark, toggles, and restores a saved preference', async () => {
@@ -299,8 +307,69 @@ test('shows interrupted jobs with retry and can remove a queued job', async () =
   assert.equal(get('job-failure').hidden, true);
   assert.equal(get('processing-title').textContent, 'Waiting for a transcription slot');
   await get('delete-job').listeners.click();
+  await get('confirm-delete-job').listeners.click();
   assert.equal(get('jobs-empty').hidden, false);
   assert.equal(get('empty-result').hidden, false);
+});
+
+test('deleting requires explicit confirmation and cancel or Escape keeps the transcription', async () => {
+  const {get,jobs,deletions} = await workspace({jobs:[{id:'saved',filename:'Interview.wav',status:'completed',created_at:1}]});
+  get('delete-job').listeners.click();
+  assert.equal(get('delete-dialog').open, true);
+  assert.equal(get('delete-job-name').textContent, 'Interview.wav');
+  assert.equal(get('cancel-delete-job').focused, true);
+  assert.equal(deletions.length, 0);
+  get('cancel-delete-job').listeners.click();
+  assert.equal(get('delete-dialog').open, false);
+  assert.equal(jobs().length, 1);
+  await get('confirm-delete-job').listeners.click();
+  assert.equal(deletions.length, 0);
+  get('delete-job').listeners.click();
+  let blocked = false;
+  get('delete-dialog').listeners.cancel({preventDefault() {blocked = true;}});
+  assert.equal(blocked, false);
+  get('delete-dialog').close();
+  assert.equal(deletions.length, 0);
+});
+
+test('confirmation deletes the captured recording even if the selected job changes', async () => {
+  const filename = '<script>test</script> جلسه.wav';
+  const {get,jobs,deletions} = await workspace({jobs:[
+    {id:'first',filename,status:'completed',created_at:1},
+    {id:'second',filename:'Other.wav',status:'completed',created_at:2},
+  ]});
+  get('delete-job').listeners.click();
+  assert.equal(get('delete-job-name').textContent, filename);
+  get('jobs-list').children[1].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  await get('confirm-delete-job').listeners.click();
+  assert.deepEqual(deletions, ['first']);
+  assert.deepEqual(jobs().map(job => job.id), ['second']);
+  assert.equal(get('delete-dialog').open, false);
+});
+
+test('confirmation blocks duplicate requests and preserves the dialog on deletion errors', async () => {
+  let respond;
+  const {get,jobs,deletions} = await workspace({jobs:[{id:'saved',filename:'Saved.wav',status:'failed',created_at:1}],onDelete:() => new Promise(resolve => {respond = resolve;})});
+  get('delete-job').listeners.click();
+  const pending = get('confirm-delete-job').listeners.click();
+  assert.equal(get('confirm-delete-job').disabled, true);
+  assert.equal(get('cancel-delete-job').disabled, true);
+  let blocked = false;
+  get('delete-dialog').listeners.cancel({preventDefault() {blocked = true;}});
+  assert.equal(blocked, true);
+  get('cancel-delete-job').listeners.click();
+  assert.equal(get('delete-dialog').open, true);
+  await get('confirm-delete-job').listeners.click();
+  assert.equal(deletions.length, 1);
+  respond({ok:false,json:async () => ({detail:'Unable to delete recording.'})});
+  await pending;
+  assert.equal(jobs().length, 1);
+  assert.equal(get('delete-dialog').open, true);
+  assert.equal(get('delete-dialog-error').textContent, 'Unable to delete recording.');
+  assert.equal(get('confirm-delete-job').disabled, false);
+  get('cancel-delete-job').listeners.click();
+  assert.equal(get('delete-dialog').open, false);
 });
 
 test('running jobs expose cancel, show cancelling, and preserve cancelled history for retry', async () => {

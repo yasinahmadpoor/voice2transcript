@@ -22,6 +22,8 @@ let selectionGeneration = 0;
 let recentJobs = [];
 let historySignature = '';
 let refreshTask = null;
+let pendingDeletion = null;
+let deletionInFlight = null;
 const cancelRequests = new Set();
 const settingInputs = document.querySelectorAll('[data-transcription-setting]');
 const languageSelect = new LanguageSelect();
@@ -366,7 +368,7 @@ async function viewJob(job) {
   $('job-actions').hidden = !job;
   $('transcript-panel').setAttribute('aria-busy', String(Boolean(pending)));
   $('retry-job').hidden = !job || !job.retryable;
-  $('delete-job').disabled = ['processing', 'cancelling'].includes(job?.status);
+  $('delete-job').disabled = ['processing', 'cancelling'].includes(job?.status) || Boolean(deletionInFlight && deletionInFlight.id === job?.id);
   updateCancelButtons();
   if (!job) {
     $('transcript-status').textContent = 'Ready when you are';
@@ -510,19 +512,60 @@ async function retrySelectedJob() {
 $('retry-job').addEventListener('click', retrySelectedJob);
 $('retry-cancelled-job').addEventListener('click', retrySelectedJob);
 
-$('delete-job').addEventListener('click', async () => {
-  if (!selectedJob) return;
+$('delete-job').addEventListener('click', () => {
+  if (!selectedJob || ['processing', 'cancelling'].includes(selectedJob.status) || $('delete-dialog').open || deletionInFlight) return;
+  pendingDeletion = { id: selectedJob.id, filename: selectedJob.filename, generation: pollGeneration };
+  $('delete-job-name').textContent = pendingDeletion.filename;
+  showError('delete-dialog-error');
+  $('delete-dialog').showModal();
+  $('cancel-delete-job').focus();
+});
+
+function closeDeleteDialog() {
+  if (!deletionInFlight && $('delete-dialog').open) $('delete-dialog').close();
+}
+
+$('cancel-delete-job').addEventListener('click', closeDeleteDialog);
+$('delete-dialog').addEventListener('cancel', event => {
+  if (deletionInFlight) event.preventDefault();
+});
+$('delete-dialog').addEventListener('close', () => {
+  pendingDeletion = null;
+  $('delete-job-name').textContent = '';
+  showError('delete-dialog-error');
+});
+
+$('confirm-delete-job').addEventListener('click', async () => {
+  const target = pendingDeletion;
+  if (!target || deletionInFlight || target.generation !== pollGeneration || !signedIn) return;
+  deletionInFlight = target;
+  $('confirm-delete-job').disabled = true;
+  $('confirm-delete-job').textContent = 'Deleting…';
+  $('cancel-delete-job').disabled = true;
   $('delete-job').disabled = true;
+  showError('delete-dialog-error');
   try {
-    const response = await fetch(`/jobs/${selectedJob.id}`, { method: 'DELETE' });
+    const response = await fetch(`/jobs/${target.id}`, { method: 'DELETE' });
     if (!response.ok) throw new Error(await errorMessage(response));
-    selectedJobId = null;
-    savedJob(null);
-    await refreshJobs();
+    if (target.generation !== pollGeneration || !signedIn) return;
+    $('delete-dialog').close();
+    if (selectedJobId === target.id) {
+      selectedJobId = null;
+      savedJob(null);
+    }
+    await refreshJobs(target.generation);
   } catch (error) {
-    showError('jobs-error', error.message);
+    if (target.generation === pollGeneration && signedIn) {
+      showError($('delete-dialog').open ? 'delete-dialog-error' : 'jobs-error', error.message);
+    }
   } finally {
-    $('delete-job').disabled = ['processing', 'cancelling'].includes(selectedJob?.status);
+    if (deletionInFlight === target) {
+      deletionInFlight = null;
+      $('confirm-delete-job').disabled = false;
+      $('confirm-delete-job').textContent = 'Delete transcription';
+      $('cancel-delete-job').disabled = false;
+      $('delete-job').disabled = ['processing', 'cancelling'].includes(selectedJob?.status);
+    }
   }
 });
 
@@ -614,6 +657,12 @@ $('transcribe-form').addEventListener('submit', async (event) => {
 });
 
 function resetWorkspace() {
+  deletionInFlight = null;
+  pendingDeletion = null;
+  if ($('delete-dialog').open) $('delete-dialog').close();
+  $('confirm-delete-job').disabled = false;
+  $('confirm-delete-job').textContent = 'Delete transcription';
+  $('cancel-delete-job').disabled = false;
   stopPolling();
   ++uploadGeneration;
   ++selectionGeneration;
