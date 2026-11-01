@@ -8,8 +8,6 @@ from collections import OrderedDict
 
 from common.http import APIError
 
-COOKIE_NAME = "voice_session"
-SESSION_SECONDS = 12 * 60 * 60
 _lock = threading.Lock()
 _attempts: OrderedDict[str, list[float]] = OrderedDict()
 

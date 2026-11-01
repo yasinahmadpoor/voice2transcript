@@ -12,6 +12,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.test")
 import django
 
 django.setup()
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.contrib.sessions.models import Session
@@ -211,36 +212,37 @@ class WebTests(TransactionTestCase):
                 content_type="application/json",
             )
             self.assertEqual(response.status_code, 401)
-            self.assertNotIn(auth.COOKIE_NAME, response.cookies)
+            self.assertNotIn(settings.SESSION_COOKIE_NAME, response.cookies)
 
     def test_session_logout_and_revocation(self):
         response = self.login()
         self.assertEqual(response.status_code, 200)
-        cookie = response.cookies[auth.COOKIE_NAME].OutputString()
+        cookie = response.cookies[settings.SESSION_COOKIE_NAME].OutputString()
         self.assertIn("HttpOnly", cookie)
         self.assertIn("SameSite=Strict", cookie)
-        token = self.client.cookies[auth.COOKIE_NAME].value
+        token = self.client.cookies[settings.SESSION_COOKIE_NAME].value
         self.assertEqual(
             self.client.get("/auth/me").json(),
             {"username": "tester", "user_id": self.user.pk, "max_upload_mb": 1},
         )
         self.assertEqual(self.client.post("/auth/logout").status_code, 204)
-        self.client.cookies[auth.COOKIE_NAME] = token
+        self.client.cookies[settings.SESSION_COOKIE_NAME] = token
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
 
     def test_expired_and_forged_sessions(self):
-        self.client.cookies[auth.COOKIE_NAME] = "forged"
+        self.client.cookies[settings.SESSION_COOKIE_NAME] = "forged"
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
         self.login()
         Session.objects.filter(
-            session_key=self.client.cookies[auth.COOKIE_NAME].value
+            session_key=self.client.cookies[settings.SESSION_COOKIE_NAME].value
         ).update(expire_date=timezone.now() - timedelta(seconds=1))
         self.assertEqual(self.client.get("/auth/me").status_code, 401)
 
     def test_secure_cookie_setting(self):
         with override_settings(SESSION_COOKIE_SECURE=True):
             self.assertIn(
-                "Secure", self.login().cookies[auth.COOKIE_NAME].OutputString()
+                "Secure",
+                self.login().cookies[settings.SESSION_COOKIE_NAME].OutputString(),
             )
 
     def test_cross_site_writes_rejected(self):
@@ -387,7 +389,7 @@ class WebTests(TransactionTestCase):
 
     def test_switching_accounts_rotates_and_revokes_previous_session(self):
         self.login()
-        old_token = self.client.cookies[auth.COOKIE_NAME].value
+        old_token = self.client.cookies[settings.SESSION_COOKIE_NAME].value
         other = get_user_model().objects.create(
             username="person-two", password=self.django_password_hash
         )
@@ -397,10 +399,12 @@ class WebTests(TransactionTestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
-        self.assertNotEqual(self.client.cookies[auth.COOKIE_NAME].value, old_token)
+        self.assertNotEqual(
+            self.client.cookies[settings.SESSION_COOKIE_NAME].value, old_token
+        )
         self.assertEqual(self.client.get("/auth/me").json()["user_id"], other.pk)
         stale = Client()
-        stale.cookies[auth.COOKIE_NAME] = old_token
+        stale.cookies[settings.SESSION_COOKIE_NAME] = old_token
         self.assertEqual(stale.get("/auth/me").status_code, 401)
 
     def test_regular_users_can_use_frontend_without_admin_access(self):

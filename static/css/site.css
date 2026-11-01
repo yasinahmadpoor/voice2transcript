@@ -660,12 +660,6 @@ input::placeholder {
   font-weight:550;
 }
 
-.file-info .muted {
-  font-size:10px;
-  display:block;
-  margin-top:4px;
-}
-
 .icon-button {
   background:none;
   border:none;
