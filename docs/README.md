@@ -4,6 +4,7 @@
 
 ## Guides
 
+- [Environment configuration](guides/configuration.md): base, development, production, and test settings.
 - [Local setup](guides/getting-started.md): dependencies, configuration, and first login.
 - [Docker and deployment](guides/deployment.md): containers, persistent storage, proxy settings, and worker limits.
 - [Accounts and administration](guides/accounts.md): adding users, access control, and private history.

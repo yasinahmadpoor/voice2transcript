@@ -9,6 +9,11 @@ uv.lock                      Resolved dependency versions and hashes
 .python-version              Default Python version for uv (3.12)
 manage.py                    Django management entry point
 config/                      Project settings, root URLs, WSGI, signing key
+  settings/
+    base.py                  Shared apps, middleware, database, and asset paths
+    development.py           Debug pages and static asset refresh
+    production.py            Docker/WSGI settings with debug disabled
+    test.py                  Temporary data, isolated database, and test key
 templates/                   Shared page layout for all apps
   base.html                  HTML shell with overridable content and head blocks
   includes/                  Shared navigation and footer
@@ -37,6 +42,8 @@ tests/                       Project integration, migration, and frontend tests
 ```
 
 `apps.accounts` and `apps.transcriptions` are registered Django applications. The accounts app uses Django's built-in User model, admin, and database sessions; it does not introduce a duplicate user model. Shared project helpers are in `common/`; application logic is contained inside its owning app.
+
+Environment settings are described in the [configuration guide](../guides/configuration.md). The settings package keeps `BASE_DIR` at the repository root; development and production use the same configured data directory and persistent signing key. The queue uses the selected settings' `DATA_DIR`, while tests use temporary storage.
 
 Project-level `templates/base.html` provides the common page layout and includes `includes/navbar.html` and `includes/footer.html`. Each app keeps its own namespaced templates and extends `base.html`, filling the `content` block and adding its assets through `extra_head`. Other pages can override `title`, `header`, `footer`, and `extra_body` as needed. Django searches the project template directory and installed apps.
 

@@ -4,6 +4,8 @@
 
 Run all commands from the repository root.
 
+Docker sets `DJANGO_SETTINGS_MODULE=config.settings.production` for both startup migrations and Gunicorn. This keeps debug disabled. The WSGI entry point also defaults to production outside Docker. See [environment configuration](configuration.md) for the available modules.
+
 The Docker image uses pinned uv 0.9.9 to run `uv sync --locked --no-dev` from `pyproject.toml` and `uv.lock`. Its own `/app/.venv` is on `PATH`, so container management commands use `python` directly and Gunicorn starts without resolving packages at runtime. Host Python and uv installations are not required for Docker.
 
 Configure `.env` with your Gemini key, then start the container:

@@ -1,17 +1,13 @@
-"""Django configuration for the multi-user transcription service."""
+"""Shared Django configuration for all environments."""
 
 import os
 from pathlib import Path
 
 from common.environment import load_env_defaults
 
-from .secrets import signing_key
-
 load_env_defaults()
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("JOB_DATA_DIR", str(BASE_DIR / "data"))).resolve()
-DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-SECRET_KEY = signing_key(DATA_DIR)
 DEBUG = False
 ALLOWED_HOSTS = [
     host.strip()

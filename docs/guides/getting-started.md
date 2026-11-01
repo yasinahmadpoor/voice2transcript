@@ -4,6 +4,8 @@
 
 Run all commands from the repository root.
 
+Management commands use `config.settings.development` by default. Use `uv run --locked python manage.py runserver --noreload` for local development. Gunicorn uses `config.settings.production` by default. See [environment configuration](configuration.md) for explicit overrides.
+
 Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.9.9 or newer and `ffmpeg` / `ffprobe` on your PATH. The project selects Python 3.12 through `.python-version`; uv can install it if needed. The declared minimum Python version remains 3.10.
 
 ```sh

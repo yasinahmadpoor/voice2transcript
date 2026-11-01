@@ -9,7 +9,7 @@ Run all commands from the repository root.
 ```sh
 uv sync --locked
 uv run --locked python manage.py check
-uv run --locked python manage.py test --noinput
+uv run --locked python manage.py test --settings=config.settings.test --noinput
 node --check static/js/theme.js
 node --check apps/transcriptions/static/transcriptions/app.js
 node tests/frontend.test.cjs

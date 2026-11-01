@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.test")
 import django
 
 django.setup()
@@ -55,7 +55,8 @@ class WebTests(TransactionTestCase):
         self.jobs_env.start()
         auth._attempts.clear()
         self.settings_override = override_settings(
-            ALLOWED_HOSTS=["testserver", "localhost"]
+            ALLOWED_HOSTS=["testserver", "localhost"],
+            DATA_DIR=Path(self.data_dir.name),
         )
         self.settings_override.enable()
         self.user = get_user_model().objects.create(

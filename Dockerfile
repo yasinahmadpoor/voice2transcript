@@ -24,6 +24,8 @@ COPY common/ ./common/
 COPY scripts/ ./scripts/
 COPY docker-entrypoint.sh ./
 
+ENV DJANGO_SETTINGS_MODULE=config.settings.production
+
 RUN DJANGO_SECRET_KEY=static-build-only python manage.py collectstatic --noinput
 RUN mkdir -p /app/outputs /app/data /tmp/opencode
 

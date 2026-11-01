@@ -18,6 +18,7 @@ class OwnershipMigrationTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         with tempfile.TemporaryDirectory() as directory:
             env = os.environ | {
+                "DJANGO_SETTINGS_MODULE": "config.settings.production",
                 "JOB_DATA_DIR": directory,
                 "DJANGO_SECRET_KEY": "migration-test-only-stable-signing-key",
                 "APP_USERNAME": "original-admin",
@@ -41,7 +42,7 @@ class OwnershipMigrationTests(unittest.TestCase):
                 stdout=subprocess.DEVNULL,
             )
             script = (
-                "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings');"
+                "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.production');"
                 "import django; django.setup();"
                 "from django.contrib.auth import get_user_model;"
                 "user=get_user_model().objects.create_user(username='alice',password='existing-alice-password');"

@@ -23,12 +23,7 @@ def get_queue():
             require_binary("ffmpeg")
             require_binary("ffprobe")
             queue = JobQueue(
-                Path(
-                    os.getenv(
-                        "JOB_DATA_DIR",
-                        str(settings.DATA_DIR),
-                    )
-                ).resolve(),
+                Path(settings.DATA_DIR).resolve(),
                 lambda *args: jobs.run_pipeline(*args),
                 workers=int(os.getenv("TRANSCRIPTION_WORKERS", "2")),
                 max_pending=int(os.getenv("MAX_PENDING_JOBS", "20")),

@@ -41,6 +41,7 @@ class WSGITests(unittest.TestCase):
                 port = listener.getsockname()[1]
             base = f"http://127.0.0.1:{port}"
             env = os.environ | {
+                "DJANGO_SETTINGS_MODULE": "config.settings.production",
                 "APP_USERNAME": "integration",
                 "APP_PASSWORD_HASH": auth.hash_password("integration-test-password"),
                 "JOB_DATA_DIR": str(folder / "data"),
