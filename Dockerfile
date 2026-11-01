@@ -14,6 +14,8 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY manage.py gunicorn.conf.py ./
 COPY config/ ./config/
 COPY apps/ ./apps/
+COPY templates/ ./templates/
+COPY static/ ./static/
 COPY common/ ./common/
 COPY scripts/ ./scripts/
 COPY docker-entrypoint.sh ./

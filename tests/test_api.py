@@ -83,8 +83,8 @@ class WebTests(TransactionTestCase):
         for path in (
             "/",
             "/static/transcriptions/app.js",
-            "/static/transcriptions/styles.css",
-            "/static/transcriptions/theme.js",
+            "/static/css/site.css",
+            "/static/js/theme.js",
             "/health",
             "/docs",
             "/openapi.json",

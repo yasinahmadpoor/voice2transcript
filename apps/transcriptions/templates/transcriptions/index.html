@@ -1,27 +1,11 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html lang="en" data-theme="dark">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#131722">
-  <title>Voice to Transcript</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='13' fill='%23665be8'/%3E%3Cpath d='M14 21v6m7-13v20m7-24v28m7-17v6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-  <script src="{% static 'transcriptions/theme.js' %}"></script>
-  <link rel="stylesheet" href="{% static 'transcriptions/styles.css' %}">
-  <script src="{% static 'transcriptions/app.js' %}" defer></script>
-</head>
-<body>
-  <header class="topbar">
-    <a class="brand" href="/" aria-label="Voice to Transcript home"><span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>voice<span class="brand-light"> / transcript</span></span></a>
-    <div class="header-actions">
-      <span id="header-note" class="header-note">A little less listening. A lot more clarity.</span>
-      <div id="account" class="account" hidden><span id="username-label"></span><button id="logout" class="quiet-button" type="button">Sign out <span aria-hidden="true">↗</span></button></div>
-      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to light mode"><span id="theme-icon" aria-hidden="true">☀</span><span id="theme-label" class="theme-label">Light mode</span></button>
-    </div>
-  </header>
 
-  <main>
+{% block extra_head %}
+  <script src="{% static 'transcriptions/app.js' %}" defer></script>
+{% endblock %}
+
+{% block content %}
     <p id="loading" class="loading" role="status">Opening your workspace…</p>
     <section id="login-view" class="login-layout" hidden aria-labelledby="login-heading">
       <div class="login-intro">
@@ -111,8 +95,8 @@
       </section>
       <p class="workspace-tip"><span aria-hidden="true">✦</span> For clearer results, use recordings with less background noise.</p>
     </section>
-  </main>
-  <footer class="page-footer"><span>Less replaying. More doing.</span><span>VOICE TO TRANSCRIPT</span></footer>
+{% endblock %}
+
+{% block extra_body %}
   <div id="toast" class="toast" role="status" hidden></div>
-</body>
-</html>
+{% endblock %}

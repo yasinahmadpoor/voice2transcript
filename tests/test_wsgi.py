@@ -214,8 +214,8 @@ class WSGITests(unittest.TestCase):
                     for path in (
                         "/",
                         "/static/transcriptions/app.js",
-                        "/static/transcriptions/styles.css",
-                        "/static/transcriptions/theme.js",
+                        "/static/css/site.css",
+                        "/static/js/theme.js",
                     ):
                         status, body, headers = request(path)
                         self.assertEqual(status, 200)

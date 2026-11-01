@@ -8,12 +8,13 @@ const { webcrypto } = require('node:crypto');
 const root = resolve(__dirname, '..');
 const html = readFileSync(resolve(root, 'apps/transcriptions/templates/transcriptions/index.html'), 'utf8');
 const source = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/app.js'), 'utf8');
+const themeSource = readFileSync(resolve(root, 'static/js/theme.js'), 'utf8');
 const defaults = {
   model: 'server-primary', fallback_model: 'server-fallback',
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
 
-async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
+async function workspace({ jobs = [], saved = null, onUpload = null, theme = null } = {}) {
   const elements = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -23,6 +24,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
   const retryKeys = new Map();
   const uploadHeaders = [];
   const storage = new Map(saved ? [['voice-selected-job:42', saved]] : []);
+  if (theme) storage.set('voice-theme', theme);
   function get(id) {
     if (!elements.has(id)) {
       elements.set(id, {
@@ -60,7 +62,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
   }
   const requests = [];
   const context = vm.createContext({
-    document: { getElementById: get, querySelectorAll: () => inputs, createElement: () => get(`created-${++elementId}`), documentElement: {dataset:{theme:'dark'}}, querySelector: () => get('theme-meta') },
+    document: { readyState: 'complete', getElementById: get, querySelectorAll: () => inputs, createElement: () => get(`created-${++elementId}`), documentElement: {dataset:{theme:'dark'}}, querySelector: () => get('theme-meta') },
     window: { addEventListener() {} },
     localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     FormData: MultipartData, AbortController, crypto:webcrypto,
@@ -105,10 +107,37 @@ async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
       return {ok:true,json:async () => structuredClone(job)};
     },
   });
+  vm.runInContext(themeSource, context);
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
   return { get, inputs, requests, timers, storage, uploadHeaders, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
 }
+
+test('shared theme defaults to dark, toggles, and restores a saved preference', async () => {
+  const { get, storage } = await workspace();
+  assert.equal(get('theme-label').textContent, 'Light mode');
+  get('theme-toggle').listeners.click();
+  assert.equal(storage.get('voice-theme'), 'light');
+  assert.equal(get('theme-meta').attributes.content, '#f7f8fa');
+  assert.equal(get('theme-toggle').attributes['aria-label'], 'Switch to dark mode');
+  const restored = await workspace({ theme: storage.get('voice-theme') });
+  assert.equal(restored.get('theme-label').textContent, 'Dark mode');
+  restored.get('theme-toggle').listeners.click();
+  assert.equal(restored.storage.get('voice-theme'), 'dark');
+});
+
+test('shared theme initializes before paint and tolerates pages without a toggle or storage', () => {
+  const document = {
+    readyState: 'loading', documentElement: { dataset: {} },
+    querySelector: () => null, getElementById: () => null,
+    addEventListener(event, callback) { this.ready = callback; },
+  };
+  vm.runInNewContext(themeSource, {
+    document, localStorage: { getItem() { throw Error('Storage unavailable'); } },
+  });
+  assert.equal(document.documentElement.dataset.theme, 'dark');
+  assert.doesNotThrow(() => document.ready());
+});
 
 test('loads the API defaults into every transcription setting and resets edits', async () => {
   const { get, inputs } = await workspace();

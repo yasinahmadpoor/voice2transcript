@@ -46,7 +46,7 @@ MIDDLEWARE = [
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -91,7 +91,7 @@ USE_TZ = True
 DEFAULT_CHARSET = "utf-8"
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = []
+STATICFILES_DIRS = [BASE_DIR / "static"]
 # There are only a handful of assets. Serving through finders also makes a
 # source checkout work without a separate collectstatic build step.
 WHITENOISE_USE_FINDERS = True

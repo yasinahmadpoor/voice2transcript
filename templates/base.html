@@ -1,0 +1,22 @@
+{% load static %}
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#131722">
+  <title>{% block title %}Voice to Transcript{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='13' fill='%23665be8'/%3E%3Cpath d='M14 21v6m7-13v20m7-24v28m7-17v6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <script src="{% static 'js/theme.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'css/site.css' %}">
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+{% block header %}{% include "includes/navbar.html" %}{% endblock %}
+  <main>
+{% block content %}{% endblock %}
+  </main>
+{% block footer %}{% include "includes/footer.html" %}{% endblock %}
+{% block extra_body %}{% endblock %}
+</body>
+</html>

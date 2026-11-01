@@ -1,25 +1,5 @@
 const $ = (id) => document.getElementById(id);
 
-function updateThemeToggle() {
-  const dark = document.documentElement.dataset.theme === 'dark';
-  $('theme-icon').textContent = dark ? '☀' : '☾';
-  $('theme-label').textContent = dark ? 'Light mode' : 'Dark mode';
-  $('theme-toggle').setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
-}
-
-$('theme-toggle').addEventListener('click', () => {
-  const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'dark' ? '#131722' : '#f7f8fa');
-  try {
-    localStorage.setItem('voice-theme', theme);
-  } catch {
-    // The toggle still works for this page when storage is unavailable.
-  }
-  updateThemeToggle();
-});
-updateThemeToggle();
-
 let selectedFiles = [];
 let previewEntryId = null;
 let uploadGeneration = 0;
