@@ -76,6 +76,11 @@ def retry_job(request, job_id):
 
 
 @methods("POST")
+def cancel_job(request, job_id):
+    return JsonResponse(get_queue().cancel(job_id, request.account), status=202)
+
+
+@methods("POST")
 def transcribe(request):
     key = request_key(request)
     queue = get_queue()
@@ -91,9 +96,11 @@ def transcribe(request):
             upload.close()
     if request.path.rstrip("/") == "/jobs":
         return JsonResponse(job, status=202, headers={"Location": f"/jobs/{job['id']}"})
-    while job["status"] in {"queued", "processing"}:
+    while job["status"] in {"queued", "processing", "cancelling"}:
         time.sleep(0.25)
         job = queue.get(job["id"], request.account)
+    if job["status"] == "cancelled":
+        raise APIError(409, "Transcription was cancelled.")
     if job["status"] != "completed":
         raise APIError(500, job["error"])
     return transcript_response(queue.result(job["id"], request.account))

@@ -87,7 +87,7 @@ class TranscriptionJobAdmin(admin.ModelAdmin):
     list_filter = ["status", "interrupted"]
     search_fields = ["id", "filename", "owner"]
     readonly_fields = [field.name for field in TranscriptionJob._meta.fields]
-    actions = ["retry_transcriptions", "remove_recordings"]
+    actions = ["retry_transcriptions", "cancel_transcriptions", "remove_recordings"]
 
     @admin.display(description="Owner", ordering="owner")
     def owner_name(self, job):
@@ -127,6 +127,13 @@ class TranscriptionJobAdmin(admin.ModelAdmin):
         self.queue_action(request, queryset, "retry")
 
     def has_retry_permission(self, request):
+        return request.user.is_superuser
+
+    @admin.action(description="Cancel selected transcriptions", permissions=["cancel"])
+    def cancel_transcriptions(self, request, queryset):
+        self.queue_action(request, queryset, "cancel")
+
+    def has_cancel_permission(self, request):
         return request.user.is_superuser
 
     @admin.action(

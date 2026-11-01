@@ -11,6 +11,7 @@ from apps.transcriptions.services.queue import (
     FAILED_UPLOAD_TTL,
     JobConflict,
     JobQueue,
+    JobNotFound,
     QueueFull,
 )
 
@@ -37,7 +38,13 @@ class QueueTests(unittest.TestCase):
         job_id = uuid4().hex
         path = queue.uploads / f"{job_id}.media"
         path.write_bytes(b"test recording")
-        settings = {"model": "primary", "chunk_minutes": 0, "language_hint": "", "fallback_model": "", "prompt": "Verbatim"}
+        settings = {
+            "model": "primary",
+            "chunk_minutes": 0,
+            "language_hint": "",
+            "fallback_model": "",
+            "prompt": "Verbatim",
+        }
         try:
             return queue.enqueue(job_id, "owner", filename, path, settings)
         except Exception:
@@ -74,7 +81,10 @@ class QueueTests(unittest.TestCase):
 
         queue = self.queue(runner)
         jobs = [self.enqueue(queue) for _ in range(5)]
-        self.assertEqual([queue.get(job["id"], "owner")["queue_position"] for job in jobs], [1, 2, 3, 4, 5])
+        self.assertEqual(
+            [queue.get(job["id"], "owner")["queue_position"] for job in jobs],
+            [1, 2, 3, 4, 5],
+        )
         queue.start()
         self.assertTrue(two_started.wait(5))
         self.assertEqual(set(started), {job["id"] for job in jobs[:2]})
@@ -84,7 +94,11 @@ class QueueTests(unittest.TestCase):
         with self.assertRaises(JobConflict):
             queue.delete(jobs[0]["id"], "owner")
         self.release.set()
-        self.wait(lambda: all(queue.get(job["id"], "owner")["status"] == "completed" for job in jobs))
+        self.wait(
+            lambda: all(
+                queue.get(job["id"], "owner")["status"] == "completed" for job in jobs
+            )
+        )
         self.wait(lambda: not list(queue.uploads.iterdir()))
         self.assertEqual(peak, 2)
 
@@ -93,7 +107,10 @@ class QueueTests(unittest.TestCase):
         queued = self.enqueue(old_queue)
         interrupted = self.enqueue(old_queue)
         with old_queue._db() as db:
-            db.execute("UPDATE jobs SET status='processing', started_at=? WHERE id=?", (time.time(), interrupted["id"]))
+            db.execute(
+                "UPDATE jobs SET status='processing', started_at=? WHERE id=?",
+                (time.time(), interrupted["id"]),
+            )
         orphan = old_queue.uploads / "incomplete.part"
         orphan.write_bytes(b"partial")
         restored = self.queue()
@@ -105,7 +122,9 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(failed["retryable"])
         self.assertFalse(orphan.exists())
         restored.retry(interrupted["id"], "owner")
-        self.wait(lambda: restored.get(interrupted["id"], "owner")["status"] == "completed")
+        self.wait(
+            lambda: restored.get(interrupted["id"], "owner")["status"] == "completed"
+        )
         restored.stop()
         reopened = self.queue()
         reopened.start()
@@ -139,7 +158,10 @@ class QueueTests(unittest.TestCase):
         third = self.enqueue(queue)
         self.assertEqual(queue.get(second["id"], "owner")["queue_position"], 1)
         with queue._db() as db:
-            db.execute("UPDATE jobs SET status='failed', finished_at=? WHERE id=?", (time.time() - FAILED_UPLOAD_TTL - 1, third["id"]))
+            db.execute(
+                "UPDATE jobs SET status='failed', finished_at=? WHERE id=?",
+                (time.time() - FAILED_UPLOAD_TTL - 1, third["id"]),
+            )
         queue.cleanup_failed_uploads()
         self.assertFalse(queue.get(third["id"], "owner")["retryable"])
         with self.assertRaises(JobConflict):
@@ -165,7 +187,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(queue.result(job["id"], "owner"), "Retried transcript")
 
     def test_existing_database_is_migrated_and_retry_keys_survive_reopening(self):
-        database = self.directory / 'jobs.sqlite3'
+        database = self.directory / "jobs.sqlite3"
         with sqlite3.connect(database) as db:
             db.execute("""CREATE TABLE jobs (
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,8 +199,68 @@ class QueueTests(unittest.TestCase):
         queue = self.queue()
         job = self.enqueue(queue)
         with queue._db() as db:
-            db.execute("UPDATE jobs SET request_key='persistent-key' WHERE id=?", (job['id'],))
+            db.execute(
+                "UPDATE jobs SET request_key='persistent-key' WHERE id=?", (job["id"],)
+            )
         reopened = self.queue()
-        self.assertEqual(reopened.find_request('owner', 'persistent-key')['id'], job['id'])
-        self.assertIsNone(reopened.find_request('another-owner', 'persistent-key'))
-        self.assertIsNone(reopened.find_request('owner', 'missing-key'))
+        self.assertEqual(
+            reopened.find_request("owner", "persistent-key")["id"], job["id"]
+        )
+        self.assertIsNone(reopened.find_request("another-owner", "persistent-key"))
+        self.assertIsNone(reopened.find_request("owner", "missing-key"))
+
+    def test_queued_cancellation_preserves_history_and_retry_identity(self):
+        queue = self.queue(max_pending=2)
+        job = self.enqueue(queue)
+        self.enqueue(queue)
+        with self.assertRaises(JobNotFound):
+            queue.cancel(job["id"], "someone-else")
+        cancelled = queue.cancel(job["id"], "owner")
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertTrue(cancelled["retryable"])
+        self.assertEqual(queue.cancel(job["id"], "owner"), cancelled)
+        self.assertEqual(queue.list("owner")["queued"], 1)
+        self.assertEqual(queue.retry(job["id"], "owner")["status"], "queued")
+        queue.cancel(job["id"], "owner")
+        with queue._db() as db:
+            db.execute(
+                "UPDATE jobs SET finished_at=? WHERE id=?",
+                (time.time() - FAILED_UPLOAD_TTL - 1, job["id"]),
+            )
+        queue.cleanup_failed_uploads()
+        self.assertFalse(queue.get(job["id"], "owner")["retryable"])
+
+    def test_cancel_wins_completion_race_and_survives_restart(self):
+        queue = self.queue()
+        job = self.enqueue(queue)
+
+        def runner(*args):
+            queue.cancel(job["id"], "owner")
+            return "Must not be published"
+
+        queue.runner = runner
+        queue.start()
+        self.wait(lambda: queue.get(job["id"], "owner")["status"] == "cancelled")
+        with self.assertRaises(JobConflict):
+            queue.result(job["id"], "owner")
+        with queue._db() as db:
+            self.assertIsNone(
+                db.execute(
+                    "SELECT transcript FROM jobs WHERE id=?", (job["id"],)
+                ).fetchone()[0]
+            )
+        queue.stop()
+        with queue._db() as db:
+            db.execute("UPDATE jobs SET status='cancelling' WHERE id=?", (job["id"],))
+        restored = self.queue()
+        restored.start()
+        self.assertEqual(restored.get(job["id"], "owner")["status"], "cancelled")
+
+    def test_completed_job_cannot_be_cancelled(self):
+        queue = self.queue()
+        job = self.enqueue(queue)
+        queue.start()
+        self.wait(lambda: queue.get(job["id"], "owner")["status"] == "completed")
+        with self.assertRaises(JobConflict):
+            queue.cancel(job["id"], "owner")
+        self.assertEqual(queue.result(job["id"], "owner"), "Transcript")

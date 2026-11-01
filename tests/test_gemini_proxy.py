@@ -106,7 +106,7 @@ class GeminiProxyTests(TestCase):
             patch.object(jobs.genai, "Client") as client,
         ):
             with self.assertRaisesRegex(providers.ProviderError, "API key"):
-                jobs.run_pipeline(
+                jobs.execute_pipeline(
                     Path("fake"),
                     "gemini-test",
                     20,
@@ -170,7 +170,7 @@ class GeminiProxyTests(TestCase):
                 ],
             ) as split,
         ):
-            result = jobs.run_pipeline(
+            result = jobs.execute_pipeline(
                 Path("fake"),
                 "gemini-test",
                 minutes,

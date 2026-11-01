@@ -16,7 +16,7 @@ const defaults = {
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
 
-async function workspace({ jobs = [], saved = null, onUpload = null, theme = null } = {}) {
+async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, theme = null } = {}) {
   const elements = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -102,6 +102,11 @@ async function workspace({ jobs = [], saved = null, onUpload = null, theme = nul
       if (action === 'result') return { ok: true, text: async () => job.transcript || 'SPEAKER_1: Test transcript' };
       if (action === 'retry') {
         Object.assign(job, {status:'queued', retryable:false, interrupted:false, queue_position:1});
+        return {ok:true,json:async () => structuredClone(job)};
+      }
+      if (action === 'cancel') {
+        if (onCancel) return onCancel(job, options);
+        Object.assign(job, {status:job.status === 'queued' ? 'cancelled' : 'cancelling', retryable:job.status === 'queued'});
         return {ok:true,json:async () => structuredClone(job)};
       }
       if (options?.method === 'DELETE') {
@@ -296,6 +301,43 @@ test('shows interrupted jobs with retry and can remove a queued job', async () =
   await get('delete-job').listeners.click();
   assert.equal(get('jobs-empty').hidden, false);
   assert.equal(get('empty-result').hidden, false);
+});
+
+test('running jobs expose cancel, show cancelling, and preserve cancelled history for retry', async () => {
+  const job = {id:'running',filename:'voice.wav',status:'processing',created_at:1,started_at:1,retryable:false};
+  const {get,setJobs,jobs} = await workspace({saved:'running',jobs:[job]});
+  assert.equal(get('cancel-job').hidden, false);
+  assert.equal(get('cancel-selected-job').hidden, false);
+  assert.equal(get('delete-job').disabled, true);
+  await get('cancel-job').listeners.click();
+  assert.equal(jobs()[0].status, 'cancelling');
+  assert.equal(get('cancel-job').disabled, true);
+  assert.equal(get('cancel-job').textContent, 'Cancelling…');
+  assert.equal(get('processing-title').textContent, 'Cancelling transcription…');
+  setJobs([{...job,status:'cancelled',retryable:true}]);
+  await get('refresh-jobs').listeners.click();
+  assert.equal(get('job-cancelled').hidden, false);
+  assert.equal(get('cancel-job').hidden, true);
+  assert.equal(get('result').hidden, true);
+  assert.equal(get('retry-cancelled-job').hidden, false);
+  assert.equal(get('delete-job').disabled, false);
+  await get('retry-cancelled-job').listeners.click();
+  assert.equal(jobs()[0].status, 'queued');
+  assert.equal(get('job-cancelled').hidden, true);
+  assert.equal(get('cancel-job').disabled, false);
+});
+
+test('queued jobs can be cancelled without disappearing and cancellation errors remain actionable', async () => {
+  const job = {id:'waiting',filename:'voice.wav',status:'queued',created_at:1,queue_position:1,retryable:false};
+  const {get,jobs} = await workspace({jobs:[job]});
+  await get('cancel-selected-job').listeners.click();
+  assert.equal(jobs().length, 1);
+  assert.equal(jobs()[0].status, 'cancelled');
+  assert.equal(get('job-cancelled').hidden, false);
+  const failed = await workspace({jobs:[job],onCancel:async () => ({ok:false,json:async () => ({detail:'Cannot reach the server.'})})});
+  await failed.get('cancel-job').listeners.click();
+  assert.equal(failed.get('jobs-error').textContent, 'Cannot reach the server.');
+  assert.equal(failed.get('cancel-job').disabled, false);
 });
 
 function batchRows(get) {

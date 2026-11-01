@@ -229,7 +229,7 @@ class ProviderTests(TestCase):
             ),
         ):
             self.assertEqual(
-                jobs.run_pipeline(
+                jobs.execute_pipeline(
                     Path("fake"),
                     "model",
                     20,
@@ -245,7 +245,7 @@ class ProviderTests(TestCase):
             jobs.genai, "Client", side_effect=ValueError("fake-private-provider-key")
         ):
             try:
-                jobs.run_pipeline(
+                jobs.execute_pipeline(
                     Path("fake"),
                     "model",
                     20,
@@ -368,6 +368,9 @@ class ProviderQueueIntegrationTests(TransactionTestCase):
         ):
             try:
                 with (
+                    patch.object(
+                        jobs, "run_pipeline", side_effect=jobs.execute_pipeline
+                    ),
                     patch.object(jobs.genai, "Client") as sdk,
                     patch.object(
                         jobs,

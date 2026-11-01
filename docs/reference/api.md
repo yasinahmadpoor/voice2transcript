@@ -11,14 +11,17 @@
 | `GET /jobs?limit=50` | List recent jobs and global queue counts; limit 1–100. |
 | `GET /jobs/{id}` | Read job status, queue position, error, retry availability, and Unix timestamps. |
 | `GET /jobs/{id}/result` | Download the UTF-8 text transcript; HTTP 409 until completed. |
-| `POST /jobs/{id}/retry` | Requeue a failed job with its original file and settings; HTTP 202. |
-| `DELETE /jobs/{id}` | Cancel a queued job or remove a completed/failed one; HTTP 409 while processing. |
+| `POST /jobs/{id}/retry` | Requeue a failed or cancelled job with its original file and settings; HTTP 202. |
+| `POST /jobs/{id}/cancel` | Cancel a queued or processing job; HTTP 202. Processing jobs become `cancelling` until their local process stops, then `cancelled`. Repeated cancellation is safe. Completed or failed jobs return HTTP 409. |
+| `DELETE /jobs/{id}` | Remove a queued, completed, failed, or cancelled job and its recording/result; HTTP 409 while processing or cancelling. |
 
 `POST /jobs` accepts the same multipart fields as the legacy API: `file`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Blank language enables auto-detection, blank fallback disables fallback, and chunk length `0` disables splitting.
 
 An optional `Idempotency-Key` header (1–128 letters, digits, underscores, or hyphens) identifies one recording upload. Reusing it for the same account returns the existing job, even if the queue is full, without transcribing it again. Keys persist with the job record; removing the job also removes its key. The frontend generates one key per selected file and reuses it for upload retries. The existing SQLite database is migrated automatically when the updated server starts.
 
 `POST /transcribe` remains compatible: it submits through the same persistent queue, waits for completion, and returns a plain-text attachment. It still needs a long HTTP connection and may hit proxy timeouts; use `/jobs` for background processing. Disconnecting does not cancel an accepted job.
+
+Cancelling preserves the job's history and idempotency key. Its recording remains available for explicit retry for 24 hours, using the original settings. Cancelling an active job stops its isolated local process and conversion children, closes its network connection, and frees its slot once it reaches `cancelled`. A provider may still finish or charge for a request it already received; this endpoint does not call a provider-specific remote cancellation API. A cancelled legacy `/transcribe` request returns HTTP 409.
 
 `GET /openapi.json` publishes the request schema and defaults. `GET /docs` provides a local endpoint reference; it replaces FastAPI's interactive documentation.
 

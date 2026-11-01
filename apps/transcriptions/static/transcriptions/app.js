@@ -22,6 +22,7 @@ let selectionGeneration = 0;
 let recentJobs = [];
 let historySignature = '';
 let refreshTask = null;
+const cancelRequests = new Set();
 const settingInputs = document.querySelectorAll('[data-transcription-setting]');
 const languageSelect = new LanguageSelect();
 
@@ -313,7 +314,7 @@ function stopPolling() {
 function labelFor(job) {
   if (job.status === 'queued') return `Queued · #${job.queue_position}`;
   if (job.interrupted && job.status === 'failed') return 'Interrupted';
-  return { processing: 'Processing', completed: 'Completed', failed: 'Failed' }[job.status];
+  return { processing: 'Processing', cancelling: 'Cancelling…', cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed' }[job.status];
 }
 
 function renderHistory(jobs) {
@@ -353,28 +354,33 @@ async function viewJob(job) {
     $('transcript-text').value = '';
   }
   selectedJob = job;
-  const pending = job && ['queued', 'processing'].includes(job.status);
+  const pending = job && ['queued', 'processing', 'cancelling'].includes(job.status);
   $('processing').hidden = !pending;
   $('empty-result').hidden = Boolean(job);
   $('job-failure').hidden = !job || job.status !== 'failed';
+  $('job-cancelled').hidden = !job || job.status !== 'cancelled';
+  $('retry-cancelled-job').hidden = !job || !job.retryable;
+  $('cancelled-note').textContent = job?.retryable ? 'Your recording stays available for retry for 24 hours.' : 'To transcribe this recording again, upload the file once more.';
   $('result').hidden = !job || job.status !== 'completed' || loadedResultId !== job.id;
   $('result-badge').hidden = !job || job.status !== 'completed';
   $('job-actions').hidden = !job;
   $('transcript-panel').setAttribute('aria-busy', String(Boolean(pending)));
   $('retry-job').hidden = !job || !job.retryable;
-  $('delete-job').disabled = job?.status === 'processing';
+  $('delete-job').disabled = ['processing', 'cancelling'].includes(job?.status);
+  updateCancelButtons();
   if (!job) {
     $('transcript-status').textContent = 'Ready when you are';
     return;
   }
   $('selected-job-note').textContent = `Selected: ${job.filename}`;
-  $('delete-job').textContent = job.status === 'queued' ? 'Cancel queued recording' : 'Remove recording';
+  $('delete-job').textContent = 'Remove recording';
   $('transcript-status').textContent = `${labelFor(job)} · ${job.filename}`;
   if (pending) {
     loadedResultId = null;
-    $('processing-title').textContent = job.status === 'queued' ? 'Waiting for a transcription slot' : 'Finding the words…';
+    $('processing-title').textContent = job.status === 'cancelling' ? 'Cancelling transcription…' : job.status === 'queued' ? 'Waiting for a transcription slot' : 'Finding the words…';
     $('processing-description').textContent = job.status === 'queued'
       ? `Queue position ${job.queue_position}. Your recording will start when a worker is available. You can leave and return later.`
+      : job.status === 'cancelling' ? 'Stopping this recording. Other transcriptions will continue.'
       : 'Your job continues if you close this page. Reopen it to check the result.';
     const started = job.status === 'queued' ? (job.queued_at || job.created_at) : (job.started_at || job.created_at);
     const seconds = Math.max(0, Math.floor(Date.now() / 1000 - started));
@@ -396,6 +402,40 @@ async function viewJob(job) {
     $('result').hidden = false;
   }
 }
+
+function updateCancelButtons() {
+  const pending = selectedJob && ['queued', 'processing', 'cancelling'].includes(selectedJob.status);
+  const cancelling = selectedJob?.status === 'cancelling' || cancelRequests.has(selectedJob?.id);
+  for (const id of ['cancel-job', 'cancel-selected-job']) {
+    $(id).hidden = !pending;
+    $(id).disabled = cancelling;
+    $(id).textContent = cancelling ? 'Cancelling…' : 'Cancel transcription';
+  }
+}
+
+async function cancelSelectedJob() {
+  if (!selectedJob || cancelRequests.has(selectedJob.id)) return;
+  const id = selectedJob.id;
+  const generation = pollGeneration;
+  cancelRequests.add(id);
+  updateCancelButtons();
+  try {
+    const response = await fetch(`/jobs/${id}/cancel`, { method: 'POST' });
+    if (!response.ok) throw new Error(await errorMessage(response));
+    const job = await response.json();
+    if (generation !== pollGeneration || !signedIn) return;
+    if (selectedJobId === id) await viewJob(job);
+    await refreshJobs(generation);
+  } catch (error) {
+    if (generation === pollGeneration && signedIn) showError('jobs-error', error.message);
+  } finally {
+    cancelRequests.delete(id);
+    updateCancelButtons();
+  }
+}
+
+$('cancel-job').addEventListener('click', cancelSelectedJob);
+$('cancel-selected-job').addEventListener('click', cancelSelectedJob);
 
 function refreshJobs(generation = pollGeneration) {
   if (refreshTask?.generation === generation) return refreshTask.promise;
@@ -451,9 +491,10 @@ async function pollJobs(generation) {
 
 $('refresh-jobs').addEventListener('click', () => refreshJobs().catch(error => showError('jobs-error', error.message)));
 
-$('retry-job').addEventListener('click', async () => {
+async function retrySelectedJob() {
   if (!selectedJob) return;
   $('retry-job').disabled = true;
+  $('retry-cancelled-job').disabled = true;
   try {
     const response = await fetch(`/jobs/${selectedJob.id}/retry`, { method: 'POST' });
     if (!response.ok) throw new Error(await errorMessage(response));
@@ -462,8 +503,12 @@ $('retry-job').addEventListener('click', async () => {
     showError('jobs-error', error.message);
   } finally {
     $('retry-job').disabled = false;
+    $('retry-cancelled-job').disabled = false;
   }
-});
+}
+
+$('retry-job').addEventListener('click', retrySelectedJob);
+$('retry-cancelled-job').addEventListener('click', retrySelectedJob);
 
 $('delete-job').addEventListener('click', async () => {
   if (!selectedJob) return;
@@ -477,7 +522,7 @@ $('delete-job').addEventListener('click', async () => {
   } catch (error) {
     showError('jobs-error', error.message);
   } finally {
-    $('delete-job').disabled = selectedJob?.status === 'processing';
+    $('delete-job').disabled = ['processing', 'cancelling'].includes(selectedJob?.status);
   }
 });
 
@@ -586,6 +631,7 @@ function resetWorkspace() {
   $('result-badge').hidden = true;
   $('processing').hidden = true;
   $('job-failure').hidden = true;
+  $('job-cancelled').hidden = true;
   $('job-actions').hidden = true;
   $('empty-result').hidden = false;
   selectedJobId = null;

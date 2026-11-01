@@ -936,6 +936,10 @@ textarea {
   max-width:270px;
 }
 
+.processing .secondary-button {
+  margin:20px auto 0;
+}
+
 .history-panel {
   margin-top: 24px;
 }
@@ -1041,6 +1045,10 @@ textarea {
   color: var(--error);
   font-size: 12px;
   line-height: 1.8;
+}
+
+#job-cancelled p,.job-state[data-status="cancelled"] {
+  color:var(--muted);
 }
 
 .spinner {

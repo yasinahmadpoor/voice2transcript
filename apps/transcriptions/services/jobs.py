@@ -12,6 +12,7 @@ from common.environment import get_api_key_from_env
 from common.http import APIError
 
 from .pipeline import run_transcription_pipeline_raw
+from .execution import run_isolated
 from .providers import (
     ProviderError,
     resolve_provider,
@@ -21,6 +22,28 @@ from .providers import (
 
 
 def run_pipeline(
+    input_path: Path,
+    model: str,
+    chunk_minutes: float,
+    language_hint: str,
+    fallback_model: str,
+    prompt: str,
+    provider: str = "env",
+) -> str:
+    return run_isolated(
+        {
+            "input_path": str(input_path),
+            "model": model,
+            "chunk_minutes": chunk_minutes,
+            "language_hint": language_hint,
+            "fallback_model": fallback_model,
+            "prompt": prompt,
+            "provider": provider,
+        }
+    )
+
+
+def execute_pipeline(
     input_path: Path,
     model: str,
     chunk_minutes: float,
@@ -67,15 +90,18 @@ def run_pipeline(
                 client.close()
         api_key = (selected.get_api_key() if selected else "") or get_api_key_from_env()
         client = genai.Client(api_key=api_key)
-        return run_transcription_pipeline_raw(
-            client=client,
-            input_path=input_path,
-            model=model,
-            chunk_minutes=chunk_minutes,
-            language_hint=language_hint,
-            fallback_model=fallback_model,
-            prompt=prompt,
-        )
+        try:
+            return run_transcription_pipeline_raw(
+                client=client,
+                input_path=input_path,
+                model=model,
+                chunk_minutes=chunk_minutes,
+                language_hint=language_hint,
+                fallback_model=fallback_model,
+                prompt=prompt,
+            )
+        finally:
+            client.close()
     except ProviderError:
         raise
     except Exception:

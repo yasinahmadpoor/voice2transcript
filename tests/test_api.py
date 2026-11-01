@@ -141,7 +141,9 @@ class WebTests(TransactionTestCase):
             self.assertEqual(
                 self.client.post("/auth/logout", headers=headers).status_code, 403
             )
-        self.assertEqual(self.client.get("/static/../common/environment.py").status_code, 404)
+        self.assertEqual(
+            self.client.get("/static/../common/environment.py").status_code, 404
+        )
         self.assertEqual(self.client.get("/static/missing.js").status_code, 404)
 
     def test_trailing_slashes_and_oversized_upload_cleanup(self):
@@ -551,10 +553,89 @@ class WebTests(TransactionTestCase):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             job = self.client.get(f"/jobs/{job_id}").json()
-            if job["status"] in {"completed", "failed"}:
+            if job["status"] in {"completed", "failed", "cancelled"}:
                 return job
             time.sleep(0.02)
         self.fail("Job did not finish")
+
+    def test_cancel_running_job_is_private_idempotent_and_retryable(self):
+        from apps.transcriptions.services.execution import check_cancelled
+
+        self.login()
+        started = threading.Event()
+
+        def runner(*args):
+            started.set()
+            while True:
+                check_cancelled()
+                time.sleep(0.01)
+
+        with patch.object(api, "run_pipeline", side_effect=runner):
+            response = self.client.post(
+                "/jobs",
+                data={"file": SimpleUploadedFile("voice.wav", b"audio")},
+                headers={"Idempotency-Key": "cancel-retry-key"},
+            )
+            job_id = response.json()["id"]
+            self.assertTrue(started.wait(5))
+            endpoint = f"/jobs/{job_id}/cancel"
+            self.assertEqual(Client().post(endpoint).status_code, 401)
+            other = Client()
+            other.force_login(get_user_model().objects.create_user("other-listener"))
+            self.assertEqual(other.post(endpoint).status_code, 404)
+            self.assertEqual(
+                self.client.post(
+                    endpoint, HTTP_ORIGIN="https://other.example"
+                ).status_code,
+                403,
+            )
+            self.assertEqual(self.client.get(endpoint).status_code, 405)
+            self.assertEqual(self.client.post(endpoint + "/").status_code, 202)
+            cancelled = self.wait_for_job(job_id)
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertTrue(cancelled["retryable"])
+        self.assertEqual(self.client.post(endpoint).json()["status"], "cancelled")
+        self.assertEqual(self.client.get(f"/jobs/{job_id}/result").status_code, 409)
+        repeated = self.client.post(
+            "/jobs", headers={"Idempotency-Key": "cancel-retry-key"}
+        )
+        self.assertEqual(repeated.json()["status"], "cancelled")
+        with patch.object(api, "run_pipeline", return_value="Retry transcript"):
+            self.assertEqual(self.client.post(f"/jobs/{job_id}/retry").status_code, 202)
+            self.assertEqual(self.wait_for_job(job_id)["status"], "completed")
+        self.assertEqual(self.client.post(endpoint).status_code, 409)
+
+    def test_cancelling_a_legacy_waiting_request_returns_conflict(self):
+        from apps.transcriptions.services.execution import check_cancelled
+
+        self.login()
+        started = threading.Event()
+
+        def runner(*args):
+            started.set()
+            while True:
+                check_cancelled()
+                time.sleep(0.01)
+
+        waiter = Client()
+        waiter.force_login(self.user)
+        with (
+            patch.object(api, "run_pipeline", side_effect=runner),
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            pending = pool.submit(
+                waiter.post,
+                "/transcribe",
+                data={"file": SimpleUploadedFile("legacy.wav", b"audio")},
+            )
+            self.assertTrue(started.wait(5))
+            job_id = self.queue.list(self.owner)["jobs"][0]["id"]
+            self.assertEqual(
+                self.client.post(f"/jobs/{job_id}/cancel").status_code, 202
+            )
+            response = pending.result(timeout=5)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "Transcription was cancelled.")
 
     def test_background_job_status_result_and_delete(self):
         self.login()

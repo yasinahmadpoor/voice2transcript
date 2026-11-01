@@ -23,7 +23,8 @@ OPERATIONS = {
         "delete": ("Remove a recording", "204"),
     },
     "/jobs/{job_id}/result": {"get": ("Download transcript", "200")},
-    "/jobs/{job_id}/retry": {"post": ("Retry a failed job", "202")},
+    "/jobs/{job_id}/retry": {"post": ("Retry a failed or cancelled job", "202")},
+    "/jobs/{job_id}/cancel": {"post": ("Cancel a queued or processing job", "202")},
     "/transcribe": {"post": ("Submit and wait for transcript", "200")},
 }
 

@@ -16,7 +16,11 @@ Uploads return a job ID immediately after the file is saved. Jobs run in queue o
 
 Queued jobs survive restarts and resume automatically. Jobs interrupted during processing are marked failed with an interruption message; use **Retry transcription** to restart them with their original recording and settings. They are not automatically retried, which avoids silently repeating provider requests. A retry starts from the beginning, not from a saved audio chunk.
 
-Recordings are sent to Gemini. Successful recordings are deleted locally after the transcript is committed. Failed or interrupted recordings are retained for retry for 24 hours, with cleanup running at startup and about once per minute. After that, upload the file again. **Remove recording** deletes a completed or failed job and its stored result; queued jobs can be cancelled. Processing jobs must finish before removal.
+Select a queued or running recording in **Recent recordings**, then click **Cancel transcription** in the transcript panel or the selected job's actions. Running jobs show **Cancelling…** while their local process stops, then **Cancelled**. Other recordings keep running. Cancellation preserves the history entry, and **Retry transcription** starts it again with the same recording and settings. Closing the browser or signing out does not cancel work.
+
+Cancellation closes the active provider connection and stops local audio conversion and transcription. A provider may still finish or charge for a request it already received.
+
+Successful recordings are deleted locally after the transcript is committed. Failed, interrupted, and cancelled recordings are retained for retry for 24 hours, with cleanup running at startup and about once per minute. After that, upload the file again. **Remove recording** deletes a job and its stored result; running or cancelling jobs must stop before removal.
 
 ## Related documentation
 

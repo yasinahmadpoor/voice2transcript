@@ -98,6 +98,8 @@ class TranscriptionJob(models.Model):
         choices=[
             ("queued", "Queued"),
             ("processing", "Processing"),
+            ("cancelling", "Cancelling"),
+            ("cancelled", "Cancelled"),
             ("completed", "Completed"),
             ("failed", "Failed"),
         ],
