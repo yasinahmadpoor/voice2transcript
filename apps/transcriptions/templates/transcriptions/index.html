@@ -2,6 +2,8 @@
 {% load static %}
 
 {% block extra_head %}
+  <link rel="stylesheet" href="{% static 'transcriptions/language-select.css' %}">
+  <script src="{% static 'transcriptions/language-select.js' %}" defer></script>
   <script src="{% static 'transcriptions/app.js' %}" defer></script>
 {% endblock %}
 
@@ -50,13 +52,22 @@
             </div>
             <p id="preview-name" class="preview-name" hidden></p>
             <audio id="audio-preview" controls hidden preload="metadata" aria-label="Preview your recording"></audio>
-            <div class="field-heading"><label for="language">Recording language</label><span>Optional hint</span></div>
-            <input id="language" name="language_hint" list="language-options" maxlength="100" placeholder="Leave blank to auto-detect" aria-describedby="language-help" data-transcription-setting>
-            <datalist id="language-options"><option value="fa">Persian / فارسی</option><option value="en">English</option><option value="ar">Arabic / العربية</option><option value="tr">Turkish</option><option value="fr">French</option><option value="de">German</option><option value="es">Spanish</option></datalist>
-            <p id="language-help" class="field-help">Enter a language code or name, or leave blank to auto-detect.</p>
+            <div class="field-heading"><label for="language-search">Recording language</label><span>Optional hint</span></div>
+            <div id="language-picker" class="language-picker">
+              <input id="language" name="language_hint" type="hidden" data-transcription-setting>
+              <div class="language-control">
+                <input id="language-search" type="text" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="language-options" aria-describedby="language-help" autocomplete="off" spellcheck="false" maxlength="100" placeholder="Search languages or choose auto-detect">
+                <button id="language-toggle" type="button" aria-label="Show recording languages" aria-controls="language-options" aria-expanded="false"><span aria-hidden="true">⌄</span></button>
+              </div>
+              <div id="language-options" class="language-options" role="listbox" aria-label="Recording languages" hidden></div>
+              <span id="language-matches" class="sr-only" role="status" aria-live="polite"></span>
+            </div>
+            <p id="language-help" class="field-help">Search 184 languages by name or code, or enter your own. Leave blank for auto-detect. Language support depends on the selected model.</p>
             <details class="transcription-settings">
               <summary>Transcription settings</summary>
               <div class="settings-fields">
+                <label for="provider">Model provider</label>
+                <select id="provider" name="provider" required data-transcription-setting><option value="env">Gemini (.env)</option></select>
                 <label for="model">Model</label>
                 <input id="model" name="model" required placeholder="Gemini model name" data-transcription-setting>
                 <label for="fallback-model">Fallback model</label>

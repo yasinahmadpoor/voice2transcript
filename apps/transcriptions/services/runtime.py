@@ -24,7 +24,7 @@ def get_queue():
             require_binary("ffprobe")
             queue = JobQueue(
                 Path(settings.DATA_DIR).resolve(),
-                lambda *args: jobs.run_pipeline(*args),
+                lambda *args, **kwargs: jobs.run_pipeline(*args, **kwargs),
                 workers=int(os.getenv("TRANSCRIPTION_WORKERS", "2")),
                 max_pending=int(os.getenv("MAX_PENDING_JOBS", "20")),
             )

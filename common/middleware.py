@@ -57,6 +57,7 @@ class RequestProtectionMiddleware:
             "/jobs",
             "/auth/me",
             "/transcription/defaults",
+            "/transcription/providers",
         } or path.startswith("/jobs/"):
             try:
                 request.account = owner_key(require_user(request))

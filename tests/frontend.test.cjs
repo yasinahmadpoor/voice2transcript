@@ -8,8 +8,10 @@ const { webcrypto } = require('node:crypto');
 const root = resolve(__dirname, '..');
 const html = readFileSync(resolve(root, 'apps/transcriptions/templates/transcriptions/index.html'), 'utf8');
 const source = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/app.js'), 'utf8');
+const languageSource = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/language-select.js'), 'utf8');
 const themeSource = readFileSync(resolve(root, 'static/js/theme.js'), 'utf8');
 const defaults = {
+  provider: 'env',
   model: 'server-primary', fallback_model: 'server-fallback',
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
@@ -31,7 +33,8 @@ async function workspace({ jobs = [], saved = null, onUpload = null, theme = nul
         id, value: '', hidden: false, disabled: false, listeners: {},
         addEventListener(event, callback) { this.listeners[event] = callback; },
         classList: { toggle() {}, add() {}, remove() {} },
-        pause() {}, load() {}, removeAttribute() {}, focus() {},
+        pause() {}, load() {}, focus() {}, select() {}, scrollIntoView() {},
+        removeAttribute(name) { delete this.attributes[name]; },
         attributes: {},
         setAttribute(name, value) { this.attributes[name] = String(value); },
         children: [],
@@ -42,7 +45,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, theme = nul
     return elements.get(id);
   }
   // Read the real form field names so an omitted or misnamed control fails.
-  const inputs = [...html.matchAll(/<(?:input|textarea)\b[^>]*data-transcription-setting[^>]*>/g)].map(([tag]) => {
+  const inputs = [...html.matchAll(/<(?:input|textarea|select)\b[^>]*data-transcription-setting[^>]*>/g)].map(([tag]) => {
     const input = get(tag.match(/\bid="([^"]+)"/)[1]);
     input.name = tag.match(/\bname="([^"]+)"/)[1];
     return input;
@@ -73,6 +76,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, theme = nul
       if (url === '/auth/me') return { ok: true, json: async () => ({ ...currentAccount, max_upload_mb: 500 }) };
       if (url === '/auth/login') return {ok:true};
       if (url === '/transcription/defaults') return { ok: true, json: async () => defaults };
+      if (url === '/transcription/providers') return {ok:true,json:async () => ({providers:[{id:'env',name:'Gemini (.env)',model:defaults.model,fallback_model:defaults.fallback_model},{id:'7',name:'Custom audio',model:'custom-audio',fallback_model:''}]})};
       if (url === '/auth/logout') return { ok: true };
       if (url === '/jobs' && !options) {
         return { ok: true, json: async () => structuredClone({ jobs: serverJobs, max_active: 2, active: serverJobs.filter(job => job.status === 'processing').length, queued: serverJobs.filter(job => job.status === 'queued').length }) };
@@ -108,6 +112,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, theme = nul
     },
   });
   vm.runInContext(themeSource, context);
+  vm.runInContext(languageSource, context);
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
   return { get, inputs, requests, timers, storage, uploadHeaders, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
@@ -155,6 +160,7 @@ test('submits all edited settings with the selected file, preserving zero and em
   const file = { name: 'selected-recording.wav', size: 32_000 };
   get('file-input').listeners.change({ target: { files: [file] } });
   const values = {
+    provider: '7',
     model: 'custom-primary', fallback_model: '', chunk_minutes: '0',
     language_hint: '', prompt: 'Custom instructions\nwith a second line.',
   };
@@ -164,7 +170,7 @@ test('submits all edited settings with the selected file, preserving zero and em
   const payload = requests[0];
   assert.equal(payload.get('file'), file, 'Selected/dragged file must replace a stale native file input');
   for (const [name, value] of Object.entries(values)) assert.equal(payload.get(name), value);
-  assert.equal(payload.size, 6);
+  assert.equal(payload.size, 7);
   assert.ok(inputs.every(input => !input.disabled));
   assert.equal(get('reset-settings').disabled, false);
   assert.equal(get('processing').hidden, false);
@@ -173,6 +179,83 @@ test('submits all edited settings with the selected file, preserving zero and em
   get('file-input').listeners.change({target:{files:[{name:'second.wav',size:100}]}});
   await get('transcribe-form').listeners.submit({preventDefault(){}});
   assert.equal(requests.length, 2, 'Another recording can be uploaded while the first job is queued');
+});
+
+test('selecting a configured provider updates model defaults and submits its identity', async () => {
+  const { get, requests } = await workspace();
+  get('provider').value = '7';
+  get('provider').listeners.change();
+  assert.equal(get('model').value, 'custom-audio');
+  assert.equal(get('fallback-model').value, '');
+  get('file-input').listeners.change({target:{files:[{name:'voice.wav',size:100}]}});
+  await get('transcribe-form').listeners.submit({preventDefault(){}});
+  assert.equal(requests[0].get('provider'), '7');
+  get('reset-settings').listeners.click();
+  assert.equal(get('provider').value, 'env');
+  assert.equal(get('model').value, defaults.model);
+});
+
+test('language selector searches a broad catalog by name, native name, and code', async () => {
+  const { get } = await workspace();
+  const search = get('language-search');
+  const list = get('language-options');
+  assert.match(search.value, /Persian/);
+  assert.equal(get('language').value, 'fa');
+  get('language-toggle').listeners.click();
+  assert.equal(list.children.length, 185, '184 ISO languages plus auto-detect');
+  assert.equal(search.attributes['aria-expanded'], 'true');
+  const options = () => list.children.map(option => option.children[0].textContent);
+  for (const query of ['Persian', 'فارسی', 'Farsi', 'fa']) {
+    search.value = query;
+    search.listeners.input();
+    assert.ok(options().some(label => label.includes('Persian')), query);
+    assert.equal(get('language').value, 'fa');
+  }
+  search.value = 'Spanish';
+  search.listeners.input();
+  assert.equal(get('language').value, 'es');
+  assert.deepEqual(options(), ['Spanish / español']);
+  search.value = 'Japanese';
+  search.listeners.input();
+  assert.deepEqual(options(), ['Japanese / 日本語']);
+  let prevented = false;
+  search.listeners.keydown({ key: 'ArrowDown', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.match(search.attributes['aria-activedescendant'], /^language-option-/);
+  search.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  assert.equal(get('language').value, 'ja');
+  assert.equal(list.hidden, true);
+  assert.equal(search.attributes['aria-activedescendant'], undefined);
+  get('reset-settings').listeners.click();
+  assert.equal(get('language').value, 'fa');
+  assert.match(search.value, /Persian/);
+});
+
+test('language selector submits codes, auto-detect, and custom hints with the batch settings', async () => {
+  const { get, requests } = await workspace({ onUpload: async () => {
+    assert.equal(get('language-search').disabled, true);
+    assert.equal(get('language-toggle').disabled, true);
+  } });
+  const search = get('language-search');
+  for (const [query, expected] of [['German', 'de'], ['', ''], ['My regional dialect', 'My regional dialect']]) {
+    search.value = query;
+    search.listeners.input();
+    if (query === 'My regional dialect') {
+      const custom = get('language-options').children.at(-1);
+      assert.equal(custom.children[1].textContent, 'Custom');
+      custom.listeners.click();
+    } else {
+      get('language-options').children[0].listeners.click();
+    }
+    get('file-input').listeners.change({ target: { files: [{ name: `${expected || 'auto'}.wav`, size: 100 }] } });
+    await get('transcribe-form').listeners.submit({ preventDefault() {} });
+    assert.equal(requests.at(-1).get('language_hint'), expected);
+    assert.equal(search.disabled, false);
+    assert.equal(get('language-toggle').disabled, false);
+  }
+  get('language-toggle').listeners.click();
+  search.listeners.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(get('language-options').hidden, true);
 });
 
 test('reopens a saved completed job without reuploading and keeps edits during polling', async () => {

@@ -13,6 +13,7 @@ OPERATIONS = {
     "/auth/me": {"get": ("Read signed-in account", "200")},
     "/auth/logout": {"post": ("Revoke session", "204")},
     "/transcription/defaults": {"get": ("Read transcription defaults", "200")},
+    "/transcription/providers": {"get": ("List enabled transcription providers", "200")},
     "/jobs": {
         "get": ("List recent jobs", "200"),
         "post": ("Submit a recording", "202"),

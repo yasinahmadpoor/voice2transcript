@@ -4,6 +4,7 @@
 
 ## Guides
 
+- [Model providers](guides/model-providers.md): Gemini and custom audio services, credentials, and defaults.
 - [Environment configuration](guides/configuration.md): base, development, production, and test settings.
 - [Local setup](guides/getting-started.md): dependencies, configuration, and first login.
 - [Docker and deployment](guides/deployment.md): containers, persistent storage, proxy settings, and worker limits.

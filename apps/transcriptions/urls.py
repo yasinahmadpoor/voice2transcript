@@ -6,6 +6,7 @@ urlpatterns = [
     path("", views.frontend),
     path("health", views.health),
     path("transcription/defaults", views.defaults),
+    path("transcription/providers", views.providers),
     path("jobs", views.jobs),
     path("jobs/<str:job_id>", views.job_detail),
     path("jobs/<str:job_id>/result", views.job_result),

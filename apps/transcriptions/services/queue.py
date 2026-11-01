@@ -175,7 +175,9 @@ class JobQueue:
         path = Path(row["input_path"])
         try:
             settings = json.loads(row["settings"])
-            text = self.runner(path, settings["model"], settings["chunk_minutes"], settings["language_hint"], settings["fallback_model"], settings["prompt"])
+            provider = settings.get("provider", "env")
+            options = {"provider": provider} if provider != "env" else {}
+            text = self.runner(path, settings["model"], settings["chunk_minutes"], settings["language_hint"], settings["fallback_model"], settings["prompt"], **options)
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Transcription returned no text.")
         except Exception:

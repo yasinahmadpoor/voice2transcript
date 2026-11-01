@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "Django audio and video transcription with Gemini and speaker labels"
 requires-python = ">=3.10"
 dependencies = [
+    "cryptography>=43",
     "Django>=5.2,<5.3",
     "google-genai",
     "gunicorn>=23,<24",
+    "httpx>=0.28,<1",
     "whitenoise>=6.9,<7",
 ]
 

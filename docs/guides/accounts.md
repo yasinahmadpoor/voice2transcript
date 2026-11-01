@@ -18,6 +18,7 @@ Django's auth/admin/session tables share `jobs.sqlite3` with the existing queue 
 
 ## Related documentation
 
+- [Model providers](model-providers.md)
 - [Local setup](getting-started.md)
 - [Docker and deployment](deployment.md)
 - [API reference](../reference/api.md)

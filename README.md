@@ -10,6 +10,7 @@ Detailed documentation is organized in [`docs/`](docs/README.md).
 - [Environment configuration](docs/guides/configuration.md)
 - [Docker and deployment](docs/guides/deployment.md)
 - [Accounts and administration](docs/guides/accounts.md)
+- [Model providers](docs/guides/model-providers.md)
 - [Transcribing recordings](docs/guides/transcriptions.md)
 - [API reference](docs/reference/api.md)
 - [Architecture and code layout](docs/reference/architecture.md)

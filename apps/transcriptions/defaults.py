@@ -23,10 +23,16 @@ API_DEFAULT_CHUNK_MINUTES = 20.0
 API_DEFAULT_LANGUAGE_HINT = "fa"
 
 
-def transcription_defaults():
+def transcription_defaults(selected=None):
+    from .services.providers import resolve_provider
+
+    provider = resolve_provider(selected)
     return {
-        "model": DEFAULT_MODEL,
-        "fallback_model": DEFAULT_FALLBACK_MODEL,
+        "provider": str(provider.pk) if provider else "env",
+        "model": provider.model if provider else DEFAULT_MODEL,
+        "fallback_model": provider.fallback_model
+        if provider
+        else DEFAULT_FALLBACK_MODEL,
         "chunk_minutes": API_DEFAULT_CHUNK_MINUTES,
         "language_hint": API_DEFAULT_LANGUAGE_HINT,
         "prompt": API_DEFAULT_PROMPT,

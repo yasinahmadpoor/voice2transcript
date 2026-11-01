@@ -9,11 +9,76 @@ from django.db.models import Q
 from apps.transcriptions.services.queue import JobConflict, JobNotFound, QueueFull
 
 from .models import TranscriptionJob
+from .models import ModelProvider
+from .forms import ModelProviderAdminForm
 from .services.runtime import get_queue
 
 admin.site.site_header = "Voice to Transcript administration"
 admin.site.site_title = "Voice to Transcript"
 admin.site.index_title = "Administration"
+
+
+@admin.register(ModelProvider)
+class ModelProviderAdmin(admin.ModelAdmin):
+    form = ModelProviderAdminForm
+    list_display = ["name", "kind", "model", "is_enabled", "is_default", "has_api_key"]
+    readonly_fields = ["is_default", "has_api_key"]
+    fields = [
+        "name",
+        "kind",
+        "base_url",
+        "api_key",
+        "clear_api_key",
+        "has_api_key",
+        "model",
+        "fallback_model",
+        "is_enabled",
+        "is_default",
+    ]
+    actions = ["use_as_default", "use_environment_default"]
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(boolean=True, description="API key saved")
+    def has_api_key(self, obj):
+        return bool(obj.api_key_encrypted)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if (
+            not change
+            and obj.is_enabled
+            and not ModelProvider.objects.filter(is_default=True).exists()
+        ):
+            obj.make_default()
+
+    @admin.action(description="Use selected provider as the default")
+    def use_as_default(self, request, queryset):
+        if queryset.count() != 1 or not queryset.first().is_enabled:
+            self.message_user(
+                request, "Select exactly one enabled provider.", messages.ERROR
+            )
+            return
+        queryset.first().make_default()
+        self.message_user(request, "Default provider updated for new transcriptions.")
+
+    @admin.action(description="Restore environment Gemini as the default")
+    def use_environment_default(self, request, queryset):
+        ModelProvider.objects.filter(is_default=True).update(is_default=False)
+        self.message_user(request, "New transcriptions default to environment Gemini.")
 
 
 @admin.register(TranscriptionJob)

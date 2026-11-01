@@ -24,6 +24,13 @@ def defaults(request):
 
 
 @methods("GET")
+def providers(request):
+    from .services.providers import available_providers
+
+    return JsonResponse({"providers": available_providers()})
+
+
+@methods("GET")
 def health(request):
     return JsonResponse({"ok": True})
 

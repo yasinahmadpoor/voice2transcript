@@ -5,12 +5,19 @@ from pathlib import Path
 from uuid import uuid4
 
 from google import genai
+from google.genai import types
 
 from apps.transcriptions.services.queue import JobNotFound
 from common.environment import get_api_key_from_env
 from common.http import APIError
 
 from .pipeline import run_transcription_pipeline_raw
+from .providers import (
+    ProviderError,
+    resolve_provider,
+    transcribe_gemini_inline,
+    transcribe_openai,
+)
 
 
 def run_pipeline(
@@ -20,18 +27,62 @@ def run_pipeline(
     language_hint: str,
     fallback_model: str,
     prompt: str,
+    provider: str = "env",
 ) -> str:
-    api_key = get_api_key_from_env()
-    client = genai.Client(api_key=api_key)
-    return run_transcription_pipeline_raw(
-        client=client,
-        input_path=input_path,
-        model=model,
-        chunk_minutes=chunk_minutes,
-        language_hint=language_hint,
-        fallback_model=fallback_model,
-        prompt=prompt,
-    )
+    try:
+        selected = resolve_provider(provider)
+        if selected and selected.kind == "openai":
+            return transcribe_openai(
+                selected,
+                input_path,
+                model,
+                chunk_minutes,
+                language_hint,
+                fallback_model,
+                prompt,
+            )
+        if selected and selected.base_url:
+            api_key = selected.get_api_key()
+            if not api_key:
+                raise ProviderError(
+                    "Add the custom Gemini provider's API key in admin."
+                )
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(
+                    base_url=selected.base_url, api_version="v1beta", timeout=600_000
+                ),
+            )
+            try:
+                return transcribe_gemini_inline(
+                    client,
+                    input_path,
+                    model,
+                    chunk_minutes,
+                    language_hint,
+                    fallback_model,
+                    prompt,
+                )
+            finally:
+                client.close()
+        api_key = (selected.get_api_key() if selected else "") or get_api_key_from_env()
+        client = genai.Client(api_key=api_key)
+        return run_transcription_pipeline_raw(
+            client=client,
+            input_path=input_path,
+            model=model,
+            chunk_minutes=chunk_minutes,
+            language_hint=language_hint,
+            fallback_model=fallback_model,
+            prompt=prompt,
+        )
+    except ProviderError:
+        raise
+    except Exception:
+        # SDK exceptions can contain credentials, URLs, or response contents.
+        raise ProviderError(
+            "Transcription provider failed. Check the selected provider in admin."
+        ) from None
 
 
 def submit_recording(queue, username, upload, parameters, request_key=None):

@@ -31,6 +31,7 @@ apps/
       queue.py               Persistent SQLite queue and worker threads
       runtime.py             Process lifecycle for the queue
       pipeline.py            Audio conversion and Gemini transcription engine
+      providers.py           Provider lookup and compatible audio API adapter
     templates/transcriptions/  App pages extending the shared base template
     static/transcriptions/     Transcription-specific JavaScript
     tests/                   Queue unit tests
@@ -42,6 +43,8 @@ tests/                       Project integration, migration, and frontend tests
 ```
 
 `apps.accounts` and `apps.transcriptions` are registered Django applications. The accounts app uses Django's built-in User model, admin, and database sessions; it does not introduce a duplicate user model. Shared project helpers are in `common/`; application logic is contained inside its owning app.
+
+`ModelProvider` is a managed Django model for administrator-defined Gemini and OpenAI-compatible services. Credentials are encrypted through `common/credentials.py`. Jobs save the selected provider ID in their existing settings JSON; existing jobs retain environment Gemini behavior. See the [provider guide](../guides/model-providers.md).
 
 Environment settings are described in the [configuration guide](../guides/configuration.md). The settings package keeps `BASE_DIR` at the repository root; development and production use the same configured data directory and persistent signing key. The queue uses the selected settings' `DATA_DIR`, while tests use temporary storage.
 

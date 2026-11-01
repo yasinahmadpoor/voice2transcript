@@ -10,6 +10,7 @@ let activeRequest = null;
 let toastTimer = null;
 let transcriptFilename = 'transcription.txt';
 let transcriptionDefaults = null;
+let modelProviders = [];
 let pollTimer = null;
 let pollGeneration = 0;
 let signedIn = false;
@@ -22,13 +23,22 @@ let recentJobs = [];
 let historySignature = '';
 let refreshTask = null;
 const settingInputs = document.querySelectorAll('[data-transcription-setting]');
+const languageSelect = new LanguageSelect();
 
 function resetSettings() {
   if (!transcriptionDefaults) return;
   for (const input of settingInputs) input.value = transcriptionDefaults[input.name];
+  languageSelect.setValue($('language').value);
 }
 
 $('reset-settings').addEventListener('click', resetSettings);
+
+$('provider').addEventListener('change', () => {
+  const provider = modelProviders.find(item => item.id === $('provider').value);
+  if (!provider) return;
+  $('model').value = provider.model;
+  $('fallback-model').value = provider.fallback_model;
+});
 
 function showError(id, message = '') {
   $(id).textContent = message;
@@ -71,6 +81,18 @@ async function openWorkspace() {
     return;
   }
   transcriptionDefaults = await defaultsResponse.json();
+  const providersResponse = await fetch('/transcription/providers');
+  if (!providersResponse.ok) {
+    showLogin(await errorMessage(providersResponse));
+    return;
+  }
+  modelProviders = (await providersResponse.json()).providers;
+  $('provider').replaceChildren(...modelProviders.map(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name;
+    return option;
+  }));
   resetSettings();
   maxUploadMb = data.max_upload_mb;
   $('upload-limit').textContent = maxUploadMb;
@@ -259,6 +281,7 @@ function setBusy(value) {
   $('file-input').disabled = value;
   $('clear-files').disabled = value;
   for (const input of settingInputs) input.disabled = value;
+  languageSelect.setDisabled(value);
   $('reset-settings').disabled = value;
   $('dropzone').classList.toggle('disabled', value);
   renderFiles();

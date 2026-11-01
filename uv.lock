@@ -846,17 +846,21 @@ name = "voice2transcript"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "django" },
     { name = "google-genai" },
     { name = "gunicorn" },
+    { name = "httpx" },
     { name = "whitenoise" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=43" },
     { name = "django", specifier = ">=5.2,<5.3" },
     { name = "google-genai" },
     { name = "gunicorn", specifier = ">=23,<24" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "whitenoise", specifier = ">=6.9,<7" },
 ]
 

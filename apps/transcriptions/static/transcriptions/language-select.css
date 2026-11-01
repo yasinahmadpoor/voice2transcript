@@ -1,0 +1,79 @@
+.input-panel {
+  overflow:visible;
+}
+
+.language-picker {
+  position:relative;
+}
+
+.language-control {
+  display:flex;
+  align-items:center;
+}
+
+.language-control input {
+  padding-right:48px;
+}
+
+#language-toggle {
+  position:absolute;
+  right:5px;
+  width:40px;
+  height:40px;
+  border:0;
+  border-radius:6px;
+  color:var(--body-text);
+  background:transparent;
+  font-size:22px;
+}
+
+#language-toggle:hover {
+  background:var(--hover);
+}
+
+.language-options {
+  position:absolute;
+  top:calc(100% + 6px);
+  left:0;
+  right:0;
+  z-index:10;
+  max-height:280px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  border:1px solid var(--field-border);
+  border-radius:10px;
+  padding:5px;
+  background:var(--surface);
+  box-shadow:0 12px 28px var(--toast-shadow);
+}
+
+.language-option {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  width:100%;
+  min-height:40px;
+  padding:10px 12px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--text);
+  text-align:left;
+  font-size:13px;
+}
+
+.language-option small {
+  flex-shrink:0;
+  color:var(--muted);
+}
+
+.language-option:hover,
+.language-option[data-active="true"] {
+  background:var(--hover);
+}
+
+.language-option[aria-selected="true"] {
+  color:var(--accent);
+  background:var(--selected);
+}

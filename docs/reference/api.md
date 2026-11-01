@@ -6,6 +6,7 @@
 
 | Endpoint | Behavior |
 | --- | --- |
+| `GET /transcription/providers` | List enabled providers and public model defaults; requires login. |
 | `POST /jobs` | Save a multipart recording and settings; return HTTP 202 with job metadata and a `Location` status URL. |
 | `GET /jobs?limit=50` | List recent jobs and global queue counts; limit 1–100. |
 | `GET /jobs/{id}` | Read job status, queue position, error, retry availability, and Unix timestamps. |
@@ -23,5 +24,6 @@ An optional `Idempotency-Key` header (1–128 letters, digits, underscores, or h
 
 ## Related documentation
 
+- [Provider selection and credentials](../guides/model-providers.md)
 - [Transcribing recordings](../guides/transcriptions.md)
 - [Accounts and administration](../guides/accounts.md)
