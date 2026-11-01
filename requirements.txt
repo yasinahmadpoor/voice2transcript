@@ -1,4 +1,4 @@
 google-genai
-fastapi
-uvicorn
-python-multipart
+Django>=5.2,<5.3
+gunicorn>=23,<24
+whitenoise>=6.9,<7

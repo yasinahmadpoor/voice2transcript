@@ -1,3 +1,4 @@
+{% load static %}
 <!doctype html>
 <html lang="en" data-theme="dark">
 <head>
@@ -6,9 +7,9 @@
   <meta name="theme-color" content="#131722">
   <title>Voice to Transcript</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='13' fill='%23665be8'/%3E%3Cpath d='M14 21v6m7-13v20m7-24v28m7-17v6' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
-  <script src="/static/theme.js"></script>
-  <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/app.js" defer></script>
+  <script src="{% static 'transcriptions/theme.js' %}"></script>
+  <link rel="stylesheet" href="{% static 'transcriptions/styles.css' %}">
+  <script src="{% static 'transcriptions/app.js' %}" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -36,13 +37,13 @@
         <p class="muted">Sign in to start your next transcription.</p>
         <form id="login-form">
           <label for="username">Username</label>
-          <input id="username" name="username" autocomplete="username" maxlength="128" required placeholder="Enter your username">
+          <input id="username" name="username" autocomplete="username" maxlength="150" required placeholder="Enter your username">
           <label for="password">Password</label>
           <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required placeholder="Enter your password">
           <p id="login-error" class="error" role="alert" hidden></p>
           <button id="login-button" class="primary-button" type="submit">Sign in <span aria-hidden="true">→</span></button>
         </form>
-        <p class="login-footnote">An account is provided by your workspace administrator.</p>
+        <p class="login-footnote">Use the account provided by your administrator. Your recordings and history are private to your account.</p>
       </div>
     </section>
 

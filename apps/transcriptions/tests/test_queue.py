@@ -1,5 +1,5 @@
-import tempfile
 import sqlite3
+import tempfile
 import threading
 import time
 import unittest
@@ -7,7 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from job_queue import FAILED_UPLOAD_TTL, JobConflict, JobQueue, QueueFull
+from apps.transcriptions.services.queue import (
+    FAILED_UPLOAD_TTL,
+    JobConflict,
+    JobQueue,
+    QueueFull,
+)
 
 
 class QueueTests(unittest.TestCase):
@@ -120,7 +125,7 @@ class QueueTests(unittest.TestCase):
         job = self.enqueue(first)
         self.assertTrue(running.wait(5))
         second = self.queue()
-        with self.assertRaisesRegex(RuntimeError, "one Uvicorn worker"):
+        with self.assertRaisesRegex(RuntimeError, "one web server worker process"):
             second.start()
         self.assertEqual(first.get(job["id"], "owner")["status"], "processing")
 
@@ -150,7 +155,7 @@ class QueueTests(unittest.TestCase):
             return "Retried transcript"
 
         queue = self.queue(runner)
-        with patch("job_queue.logger.exception"):
+        with patch("apps.transcriptions.services.queue.logger.exception"):
             queue.start()
             job = self.enqueue(queue)
             self.wait(lambda: queue.get(job["id"], "owner")["status"] == "failed")

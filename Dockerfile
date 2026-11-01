@@ -11,11 +11,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY transcription_diarize.py transcription_api.py auth.py setup_login.py job_queue.py ./
-COPY static/ ./static/
+COPY manage.py gunicorn.conf.py ./
+COPY config/ ./config/
+COPY apps/ ./apps/
+COPY common/ ./common/
+COPY scripts/ ./scripts/
+COPY docker-entrypoint.sh ./
 
+RUN DJANGO_SECRET_KEY=static-build-only python manage.py collectstatic --noinput
 RUN mkdir -p /app/outputs /app/data /tmp/opencode
 
 EXPOSE 8000
 
-CMD ["uvicorn", "transcription_api:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
+
+CMD ["gunicorn", "config.wsgi:application", "--config", "gunicorn.conf.py"]

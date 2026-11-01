@@ -78,7 +78,7 @@ class JobQueue:
             fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             lock_file.close()
-            raise RuntimeError("Another queue process is using JOB_DATA_DIR. Run exactly one Uvicorn worker.") from exc
+            raise RuntimeError("Another queue process is using JOB_DATA_DIR. Run exactly one web server worker process.") from exc
         self._lock_file = lock_file
         try:
             with self._db() as db:

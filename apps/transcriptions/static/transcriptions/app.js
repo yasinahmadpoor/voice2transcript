@@ -83,6 +83,8 @@ async function openWorkspace() {
     return;
   }
   const data = await response.json();
+  // Clear recordings, previews, and transcript edits before showing an account.
+  resetWorkspace();
   const defaultsResponse = await fetch('/transcription/defaults');
   if (!defaultsResponse.ok) {
     showLogin(await errorMessage(defaultsResponse));
@@ -99,7 +101,7 @@ async function openWorkspace() {
   $('account').hidden = false;
   $('header-note').hidden = true;
   $('password').value = '';
-  accountName = data.username;
+  accountName = String(data.user_id);
   selectedJobId = savedJob();
   signedIn = true;
   const generation = ++pollGeneration;

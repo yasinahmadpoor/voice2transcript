@@ -6,8 +6,8 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 
 const root = resolve(__dirname, '..');
-const html = readFileSync(resolve(root, 'static/index.html'), 'utf8');
-const source = readFileSync(resolve(root, 'static/app.js'), 'utf8');
+const html = readFileSync(resolve(root, 'apps/transcriptions/templates/transcriptions/index.html'), 'utf8');
+const source = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/app.js'), 'utf8');
 const defaults = {
   model: 'server-primary', fallback_model: 'server-fallback',
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
@@ -19,9 +19,10 @@ async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
   let timerId = 0;
   let elementId = 0;
   let serverJobs = structuredClone(jobs);
+  let currentAccount = {username:'tester',user_id:42};
   const retryKeys = new Map();
   const uploadHeaders = [];
-  const storage = new Map(saved ? [['voice-selected-job:tester', saved]] : []);
+  const storage = new Map(saved ? [['voice-selected-job:42', saved]] : []);
   function get(id) {
     if (!elements.has(id)) {
       elements.set(id, {
@@ -67,7 +68,8 @@ async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
     clearTimeout: id => timers.delete(id),
     URL: { createObjectURL: () => 'blob:preview', revokeObjectURL() {} },
     fetch: async (url, options) => {
-      if (url === '/auth/me') return { ok: true, json: async () => ({ username: 'tester', max_upload_mb: 500 }) };
+      if (url === '/auth/me') return { ok: true, json: async () => ({ ...currentAccount, max_upload_mb: 500 }) };
+      if (url === '/auth/login') return {ok:true};
       if (url === '/transcription/defaults') return { ok: true, json: async () => defaults };
       if (url === '/auth/logout') return { ok: true };
       if (url === '/jobs' && !options) {
@@ -105,7 +107,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null } = {}) {
   });
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { get, inputs, requests, timers, storage, uploadHeaders, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);} };
+  return { get, inputs, requests, timers, storage, uploadHeaders, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
 }
 
 test('loads the API defaults into every transcription setting and resets edits', async () => {
@@ -290,4 +292,22 @@ test('distinct files with identical names and sizes are both submitted', async (
   assert.equal(requests[0].get('file'), files[0]);
   assert.equal(requests[1].get('file'), files[1]);
   assert.notEqual(uploadHeaders[0]['Idempotency-Key'], uploadHeaders[1]['Idempotency-Key']);
+});
+
+test('switching users clears private transcripts and selections, including reused usernames', async () => {
+  const {get,setAccount,setJobs,storage} = await workspace({saved:'private-first',jobs:[{id:'private-first',filename:'private.wav',status:'completed',created_at:1,queue_position:0,transcript:'Private first account transcript'}]});
+  get('transcript-text').value = 'Private edited transcript';
+  get('file-input').listeners.change({target:{files:[{name:'private-unsubmitted.wav',size:100}]}});
+  await get('logout').listeners.click();
+  assert.equal(get('transcript-text').value, '');
+  assert.equal(get('audio-preview').hidden, true);
+  setAccount({username:'tester',user_id:43});
+  setJobs([]);
+  await get('login-form').listeners.submit({preventDefault(){}});
+  assert.equal(get('transcript-text').value, '');
+  assert.equal(get('result').hidden, true);
+  assert.equal(get('jobs-empty').hidden, false);
+  assert.equal(get('batch-review').hidden, true);
+  assert.equal(storage.get('voice-selected-job:42'), 'private-first');
+  assert.equal(storage.has('voice-selected-job:43'), false);
 });
