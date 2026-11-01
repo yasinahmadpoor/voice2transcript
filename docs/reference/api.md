@@ -9,9 +9,9 @@
 | `GET /transcription/providers` | List enabled providers and public model defaults; requires login. |
 | `POST /jobs` | Save a multipart recording and settings; return HTTP 202 with job metadata and a `Location` status URL. |
 | `GET /jobs?limit=50` | List recent jobs and global queue counts; limit 1–100. |
-| `GET /jobs/{id}` | Read job status, queue position, error, retry availability, and Unix timestamps. |
+| `GET /jobs/{id}` | Read job status, queue position, error, retry/resume availability, chunk progress, and Unix timestamps. |
 | `GET /jobs/{id}/result` | Download the UTF-8 text transcript; HTTP 409 until completed. |
-| `POST /jobs/{id}/retry` | Requeue a failed or cancelled job with its original file and settings; HTTP 202. |
+| `POST /jobs/{id}/retry` | Requeue a failed or cancelled job with its original file/settings and resume saved chunks; HTTP 202. Send JSON `{"restart":true}` to discard progress and restart. Empty requests remain supported. |
 | `POST /jobs/{id}/cancel` | Cancel a queued or processing job; HTTP 202. Processing jobs become `cancelling` until their local process stops, then `cancelled`. Repeated cancellation is safe. Completed or failed jobs return HTTP 409. |
 | `DELETE /jobs/{id}` | Remove a queued, completed, failed, or cancelled job and its recording/result; HTTP 409 while processing or cancelling. |
 
@@ -22,6 +22,10 @@ An optional `Idempotency-Key` header (1–128 letters, digits, underscores, or h
 `POST /transcribe` remains compatible: it submits through the same persistent queue, waits for completion, and returns a plain-text attachment. It still needs a long HTTP connection and may hit proxy timeouts; use `/jobs` for background processing. Disconnecting does not cancel an accepted job.
 
 Cancelling preserves the job's history and idempotency key. Its recording remains available for explicit retry for 24 hours, using the original settings. Cancelling an active job stops its isolated local process and conversion children, closes its network connection, and frees its slot once it reaches `cancelled`. A provider may still finish or charge for a request it already received; this endpoint does not call a provider-specific remote cancellation API. A cancelled legacy `/transcribe` request returns HTTP 409.
+
+Job metadata includes `progress: {"completed_chunks": 3, "total_chunks": 10}`, `resumable`, and `restart_required`. Counts are zero before audio preparation and after checkpoint cleanup; saved transcript chunks are never included in status responses. Failed/cancelled jobs retain checkpoints alongside recordings for 24 hours. Completed jobs keep their final transcript and discard checkpoints. Deleting a job removes its checkpoints.
+
+Resume validates the source recording, actual chunk boundaries/content, and provider/model/prompt settings. Incompatible saved progress is preserved and the job fails with `restart_required: true`; explicitly restart to proceed. API key rotation is compatible. An unfinished/uncommitted chunk may be requested again. With splitting disabled there is no intermediate progress. Existing failed jobs without checkpoints start from the beginning.
 
 `GET /openapi.json` publishes the request schema and defaults. `GET /docs` provides a local endpoint reference; it replaces FastAPI's interactive documentation.
 

@@ -335,7 +335,8 @@ function renderHistory(jobs) {
     name.textContent = job.filename;
     const status = document.createElement('span');
     status.className = 'job-state';
-    status.textContent = labelFor(job);
+    const progress = job.progress;
+    status.textContent = labelFor(job) + (progress?.total_chunks > 0 ? ` · ${progress.completed_chunks}/${progress.total_chunks} chunks` : '');
     status.setAttribute('data-status', job.status);
     row.append(name, status);
     row.addEventListener('click', () => {
@@ -361,13 +362,21 @@ async function viewJob(job) {
   $('empty-result').hidden = Boolean(job);
   $('job-failure').hidden = !job || job.status !== 'failed';
   $('job-cancelled').hidden = !job || job.status !== 'cancelled';
-  $('retry-cancelled-job').hidden = !job || !job.retryable;
+  const canRetry = job?.retryable && !job.restart_required;
+  const retryLabel = job?.resumable ? 'Resume transcription' : 'Retry transcription';
+  $('retry-cancelled-job').hidden = !canRetry;
+  $('retry-cancelled-job').textContent = retryLabel;
+  $('retry-job').textContent = retryLabel;
+  $('restart-job').hidden = !job?.retryable || !(job.progress?.completed_chunks > 0 || job.restart_required);
+  const progress = job?.progress;
+  $('chunk-progress').hidden = !(progress?.total_chunks > 0);
+  $('chunk-progress').textContent = progress?.total_chunks > 0 ? `${progress.completed_chunks} of ${progress.total_chunks} chunks completed. ${job.restart_required ? 'Restart from beginning to use the current configuration.' : 'Saved chunks will be reused when you resume.'}` : '';
   $('cancelled-note').textContent = job?.retryable ? 'Your recording stays available for retry for 24 hours.' : 'To transcribe this recording again, upload the file once more.';
   $('result').hidden = !job || job.status !== 'completed' || loadedResultId !== job.id;
   $('result-badge').hidden = !job || job.status !== 'completed';
   $('job-actions').hidden = !job;
   $('transcript-panel').setAttribute('aria-busy', String(Boolean(pending)));
-  $('retry-job').hidden = !job || !job.retryable;
+  $('retry-job').hidden = !canRetry;
   $('delete-job').disabled = ['processing', 'cancelling'].includes(job?.status) || Boolean(deletionInFlight && deletionInFlight.id === job?.id);
   updateCancelButtons();
   if (!job) {
@@ -493,24 +502,30 @@ async function pollJobs(generation) {
 
 $('refresh-jobs').addEventListener('click', () => refreshJobs().catch(error => showError('jobs-error', error.message)));
 
-async function retrySelectedJob() {
+async function retrySelectedJob(restart = false) {
   if (!selectedJob) return;
+  const id = selectedJob.id;
+  const generation = pollGeneration;
   $('retry-job').disabled = true;
   $('retry-cancelled-job').disabled = true;
+  $('restart-job').disabled = true;
   try {
-    const response = await fetch(`/jobs/${selectedJob.id}/retry`, { method: 'POST' });
+    const options = restart ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({restart:true})} : {method:'POST'};
+    const response = await fetch(`/jobs/${id}/retry`, options);
     if (!response.ok) throw new Error(await errorMessage(response));
-    await refreshJobs();
+    if (generation === pollGeneration && signedIn) await refreshJobs(generation);
   } catch (error) {
-    showError('jobs-error', error.message);
+    if (generation === pollGeneration && signedIn) showError('jobs-error', error.message);
   } finally {
     $('retry-job').disabled = false;
     $('retry-cancelled-job').disabled = false;
+    $('restart-job').disabled = false;
   }
 }
 
-$('retry-job').addEventListener('click', retrySelectedJob);
-$('retry-cancelled-job').addEventListener('click', retrySelectedJob);
+$('retry-job').addEventListener('click', () => retrySelectedJob());
+$('retry-cancelled-job').addEventListener('click', () => retrySelectedJob());
+$('restart-job').addEventListener('click', () => retrySelectedJob(true));
 
 $('delete-job').addEventListener('click', () => {
   if (!selectedJob || ['processing', 'cancelling'].includes(selectedJob.status) || $('delete-dialog').open || deletionInFlight) return;
@@ -681,6 +696,7 @@ function resetWorkspace() {
   $('processing').hidden = true;
   $('job-failure').hidden = true;
   $('job-cancelled').hidden = true;
+  $('chunk-progress').hidden = true;
   $('job-actions').hidden = true;
   $('empty-result').hidden = false;
   selectedJobId = null;

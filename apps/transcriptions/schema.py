@@ -13,7 +13,9 @@ OPERATIONS = {
     "/auth/me": {"get": ("Read signed-in account", "200")},
     "/auth/logout": {"post": ("Revoke session", "204")},
     "/transcription/defaults": {"get": ("Read transcription defaults", "200")},
-    "/transcription/providers": {"get": ("List enabled transcription providers", "200")},
+    "/transcription/providers": {
+        "get": ("List enabled transcription providers", "200")
+    },
     "/jobs": {
         "get": ("List recent jobs", "200"),
         "post": ("Submit a recording", "202"),
@@ -23,7 +25,9 @@ OPERATIONS = {
         "delete": ("Remove a recording", "204"),
     },
     "/jobs/{job_id}/result": {"get": ("Download transcript", "200")},
-    "/jobs/{job_id}/retry": {"post": ("Retry a failed or cancelled job", "202")},
+    "/jobs/{job_id}/retry": {
+        "post": ("Resume a failed or cancelled job, or restart explicitly", "202")
+    },
     "/jobs/{job_id}/cancel": {"post": ("Cancel a queued or processing job", "202")},
     "/transcribe": {"post": ("Submit and wait for transcript", "200")},
 }
@@ -117,6 +121,35 @@ def openapi(request):
                         }
                     },
                 }
+            if path == "/jobs/{job_id}/retry":
+                operation["requestBody"] = {
+                    "required": False,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "restart": {"type": "boolean", "default": False}
+                                },
+                            }
+                        }
+                    },
+                }
+            if (
+                path
+                in {
+                    "/jobs",
+                    "/jobs/{job_id}",
+                    "/jobs/{job_id}/retry",
+                    "/jobs/{job_id}/cancel",
+                }
+                and not (path == "/jobs" and method == "get")
+                and method != "delete"
+            ):
+                operation["responses"][status]["content"] = {
+                    "application/json": {"schema": {"$ref": "#/components/schemas/Job"}}
+                }
             paths[path][method] = operation
     return JsonResponse(
         {
@@ -132,11 +165,41 @@ def openapi(request):
                     }
                 },
                 "schemas": {
+                    "Job": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "status": {
+                                "type": "string",
+                                "enum": [
+                                    "queued",
+                                    "processing",
+                                    "cancelling",
+                                    "cancelled",
+                                    "failed",
+                                    "completed",
+                                ],
+                            },
+                            "retryable": {"type": "boolean"},
+                            "resumable": {"type": "boolean"},
+                            "restart_required": {"type": "boolean"},
+                            "progress": {
+                                "type": "object",
+                                "properties": {
+                                    "completed_chunks": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                    },
+                                    "total_chunks": {"type": "integer", "minimum": 0},
+                                },
+                            },
+                        },
+                    },
                     "Recording": {
                         "type": "object",
                         "required": ["file"],
                         "properties": properties,
-                    }
+                    },
                 },
             },
         }

@@ -1026,6 +1026,13 @@ textarea {
   color: var(--muted);
 }
 
+.chunk-progress {
+  margin:16px 25px 0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.7;
+}
+
 .history-panel > .error {
   margin: 16px 25px;
 }

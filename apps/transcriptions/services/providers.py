@@ -9,6 +9,7 @@ import httpx
 from google.genai import types
 
 from common.http import APIError
+from .checkpoints import transcribe_chunks
 
 from .pipeline import (
     DEFAULT_FALLBACK_MODEL,
@@ -65,7 +66,14 @@ class ProviderError(RuntimeError):
 
 
 def transcribe_gemini_inline(
-    client, input_path, model, chunk_minutes, language_hint, fallback_model, prompt
+    client,
+    input_path,
+    model,
+    chunk_minutes,
+    language_hint,
+    fallback_model,
+    prompt,
+    checkpoint=None,
 ):
     """Use generateContent alone so Gemini proxies need no Files API support."""
     effective_prompt = prompt.strip() or PROMPT_BASE
@@ -77,8 +85,9 @@ def transcribe_gemini_inline(
     with tempfile.TemporaryDirectory(prefix="gemini_proxy_transcription_") as directory:
         wav = Path(directory) / "recording.wav"
         convert_to_wav(input_path, wav)
-        results = []
-        for path, _offset in split_wav(wav, minutes):
+        chunks = split_wav(wav, minutes)
+
+        def transcribe(path):
             size = path.stat().st_size
             if size > 10 * 1024 * 1024:
                 raise ProviderError(
@@ -105,8 +114,9 @@ def transcribe_gemini_inline(
                 text = extract_response_text_exact(response)
             if not text.strip():
                 raise ProviderError("Gemini proxy returned no transcript text.")
-            results.append(text)
-        return "\n\n".join(results)
+            return text
+
+        return transcribe_chunks(chunks, transcribe, checkpoint)
 
 
 def _request_chunk(client, provider, path, model, language_hint, prompt):
@@ -138,7 +148,14 @@ def _request_chunk(client, provider, path, model, language_hint, prompt):
 
 
 def transcribe_openai(
-    provider, input_path, model, chunk_minutes, language_hint, fallback_model, prompt
+    provider,
+    input_path,
+    model,
+    chunk_minutes,
+    language_hint,
+    fallback_model,
+    prompt,
+    checkpoint=None,
 ):
     key = provider.get_api_key()
     headers = {"Authorization": f"Bearer {key}"} if key else {}
@@ -148,13 +165,13 @@ def transcribe_openai(
         wav = Path(directory) / "recording.wav"
         convert_to_wav(input_path, wav)
         chunks = split_wav(wav, minutes)
-        results = []
         with httpx.Client(
             headers=headers,
             timeout=httpx.Timeout(600, connect=30),
             follow_redirects=False,
         ) as client:
-            for path, _offset in chunks:
+
+            def transcribe(path):
                 if path.stat().st_size > 25 * 1024 * 1024:
                     raise ProviderError(
                         "Audio chunk exceeds 25 MB. Enable chunking for this recording."
@@ -168,5 +185,6 @@ def transcribe_openai(
                     )
                 if not text.strip():
                     raise ProviderError("Provider returned no transcript text.")
-                results.append(text)
-        return "\n\n".join(results)
+                return text
+
+            return transcribe_chunks(chunks, transcribe, checkpoint)

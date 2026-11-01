@@ -663,7 +663,10 @@ def run_transcription_pipeline_raw(
     language_hint: str = "",
     fallback_model: str = DEFAULT_FALLBACK_MODEL,
     prompt: str = PROMPT_BASE,
+    checkpoint=None,
 ) -> str:
+    from .checkpoints import transcribe_chunks
+
     with tempfile.TemporaryDirectory(prefix="gemini_diarize_") as tmpdir:
         tmp = Path(tmpdir)
         normalized_wav = tmp / "normalized.wav"
@@ -674,10 +677,9 @@ def run_transcription_pipeline_raw(
         chunks = split_wav(normalized_wav, chunk_minutes)
         print(f"Chunks: {len(chunks)}")
 
-        chunk_texts: List[str] = []
-        for i, (chunk_path, _offset) in enumerate(chunks, start=1):
-            print(f"[{i}/{len(chunks)}] Transcribing: {chunk_path.name}")
-            chunk_text = transcribe_chunk_raw(
+        def transcribe(chunk_path):
+            print(f"Transcribing: {chunk_path.name}")
+            return transcribe_chunk_raw(
                 client=client,
                 model=model,
                 chunk_path=chunk_path,
@@ -685,9 +687,7 @@ def run_transcription_pipeline_raw(
                 fallback_model=fallback_model,
                 prompt=prompt,
             )
-            chunk_texts.append(chunk_text)
-
-        return "\n\n".join(chunk_texts)
+        return transcribe_chunks(chunks, transcribe, checkpoint)
 
 
 def write_outputs(prefix: Path, language: str, segments: List[Dict[str, Any]]) -> None:

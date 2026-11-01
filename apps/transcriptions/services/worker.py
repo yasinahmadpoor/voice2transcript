@@ -11,6 +11,7 @@ def main():
     # Raise out of blocking provider calls on termination, allowing normal
     # cleanup where possible. The parent enforces a one-second shutdown limit.
     from .execution import JobCancelled
+    from .checkpoints import CheckpointMismatch
 
     def terminate(signum, frame):
         raise JobCancelled()
@@ -27,6 +28,9 @@ def main():
         with redirect_stdout(sys.stderr):
             result = execute_pipeline(**parameters)
         json.dump(result, sys.stdout)
+    except CheckpointMismatch:
+        json.dump({"error": "checkpoint_mismatch"}, sys.stdout)
+        return 2
     except Exception:
         # Provider errors may include secrets; the parent reports a safe error.
         return 1

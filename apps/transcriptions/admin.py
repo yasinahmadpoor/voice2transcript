@@ -87,7 +87,12 @@ class TranscriptionJobAdmin(admin.ModelAdmin):
     list_filter = ["status", "interrupted"]
     search_fields = ["id", "filename", "owner"]
     readonly_fields = [field.name for field in TranscriptionJob._meta.fields]
-    actions = ["retry_transcriptions", "cancel_transcriptions", "remove_recordings"]
+    actions = [
+        "retry_transcriptions",
+        "restart_transcriptions",
+        "cancel_transcriptions",
+        "remove_recordings",
+    ]
 
     @admin.display(description="Owner", ordering="owner")
     def owner_name(self, job):
@@ -121,13 +126,20 @@ class TranscriptionJobAdmin(admin.ModelAdmin):
         return False
 
     @admin.action(
-        description="Retry selected failed transcriptions", permissions=["retry"]
+        description="Resume or retry selected transcriptions", permissions=["retry"]
     )
     def retry_transcriptions(self, request, queryset):
         self.queue_action(request, queryset, "retry")
 
     def has_retry_permission(self, request):
         return request.user.is_superuser
+
+    @admin.action(
+        description="Restart selected transcriptions from beginning",
+        permissions=["retry"],
+    )
+    def restart_transcriptions(self, request, queryset):
+        self.queue_action(request, queryset, "retry", restart=True)
 
     @admin.action(description="Cancel selected transcriptions", permissions=["cancel"])
     def cancel_transcriptions(self, request, queryset):
@@ -145,12 +157,12 @@ class TranscriptionJobAdmin(admin.ModelAdmin):
     def has_remove_permission(self, request):
         return request.user.is_superuser
 
-    def queue_action(self, request, queryset, operation):
+    def queue_action(self, request, queryset, operation, **options):
         queue = get_queue()
         succeeded = 0
         for job in queryset:
             try:
-                getattr(queue, operation)(job.id, job.owner)
+                getattr(queue, operation)(job.id, job.owner, **options)
                 succeeded += 1
             except (JobConflict, JobNotFound, QueueFull) as exc:
                 self.message_user(request, f"{job.filename}: {exc}", messages.WARNING)

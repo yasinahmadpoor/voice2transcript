@@ -13,6 +13,7 @@ from common.http import APIError
 
 from .pipeline import run_transcription_pipeline_raw
 from .execution import run_isolated
+from .checkpoints import CheckpointMismatch, ChunkCheckpoint, current_checkpoint
 from .providers import (
     ProviderError,
     resolve_provider,
@@ -39,6 +40,7 @@ def run_pipeline(
             "fallback_model": fallback_model,
             "prompt": prompt,
             "provider": provider,
+            "checkpoint_context": current_checkpoint(),
         }
     )
 
@@ -51,9 +53,29 @@ def execute_pipeline(
     fallback_model: str,
     prompt: str,
     provider: str = "env",
+    checkpoint_context=None,
 ) -> str:
     try:
         selected = resolve_provider(provider)
+        checkpoint = (
+            ChunkCheckpoint(
+                checkpoint_context,
+                input_path,
+                {
+                    "provider": provider,
+                    "kind": selected.kind if selected else "gemini",
+                    "base_url": selected.base_url.rstrip("/") if selected else "",
+                    "model": model,
+                    "fallback_model": fallback_model,
+                    "chunk_minutes": chunk_minutes,
+                    "language_hint": language_hint,
+                    "prompt": prompt,
+                },
+            )
+            if checkpoint_context
+            else None
+        )
+        options = {"checkpoint": checkpoint} if checkpoint is not None else {}
         if selected and selected.kind == "openai":
             return transcribe_openai(
                 selected,
@@ -63,6 +85,7 @@ def execute_pipeline(
                 language_hint,
                 fallback_model,
                 prompt,
+                **options,
             )
         if selected and selected.base_url:
             api_key = selected.get_api_key()
@@ -85,6 +108,7 @@ def execute_pipeline(
                     language_hint,
                     fallback_model,
                     prompt,
+                    **options,
                 )
             finally:
                 client.close()
@@ -99,10 +123,11 @@ def execute_pipeline(
                 language_hint=language_hint,
                 fallback_model=fallback_model,
                 prompt=prompt,
+                **options,
             )
         finally:
             client.close()
-    except ProviderError:
+    except (ProviderError, CheckpointMismatch):
         raise
     except Exception:
         # SDK exceptions can contain credentials, URLs, or response contents.

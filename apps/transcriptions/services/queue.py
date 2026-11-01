@@ -11,13 +11,12 @@ from pathlib import Path
 from typing import Callable
 
 from .execution import JobCancelled, cancellation_scope, check_cancelled
+from .checkpoints import SCHEMA, CheckpointMismatch, checkpoint_scope
 
 logger = logging.getLogger(__name__)
 FAILED_UPLOAD_TTL = 24 * 60 * 60
-INTERRUPTED = "The server restarted while this recording was processing. Retry the job to start again."
-FAILED = (
-    "Transcription failed. Check the recording and Gemini configuration, then retry."
-)
+INTERRUPTED = "The server restarted while this recording was processing. Resume or retry this job."
+FAILED = "Transcription failed. Check the recording and provider configuration, then resume or retry."
 
 
 class QueueFull(Exception):
@@ -72,6 +71,7 @@ class JobQueue:
                 "CREATE INDEX IF NOT EXISTS jobs_pending ON jobs(status, queued_at, sequence)"
             )
             db.execute("CREATE INDEX IF NOT EXISTS jobs_owner ON jobs(owner, sequence)")
+            db.execute(SCHEMA)
         self.database.chmod(0o600)
 
     @contextmanager
@@ -202,10 +202,12 @@ class JobQueue:
                 "SELECT * FROM jobs WHERE status='queued' ORDER BY queued_at, sequence LIMIT 1"
             ).fetchone()
             if row is not None:
+                started_at = time.time()
                 db.execute(
                     "UPDATE jobs SET status='processing', started_at=? WHERE id=?",
-                    (time.time(), row["id"]),
+                    (started_at, row["id"]),
                 )
+                row = dict(row) | {"started_at": started_at}
             return row
 
     def _worker(self) -> None:
@@ -240,7 +242,10 @@ class JobQueue:
     def _process(self, row) -> None:
         path = Path(row["input_path"])
         try:
-            with cancellation_scope(lambda: self._cancel_requested(row["id"])):
+            with (
+                cancellation_scope(lambda: self._cancel_requested(row["id"])),
+                checkpoint_scope(self.database, row["id"], row["started_at"]),
+            ):
                 check_cancelled()
                 settings = json.loads(row["settings"])
                 provider = settings.get("provider", "env")
@@ -264,6 +269,12 @@ class JobQueue:
                         "UPDATE jobs SET status='failed', interrupted=1, error=?, finished_at=? WHERE id=? AND status='processing'",
                         (INTERRUPTED, time.time(), row["id"]),
                     )
+        except CheckpointMismatch:
+            with self._db() as db:
+                db.execute(
+                    "UPDATE jobs SET status='failed', error=?, finished_at=? WHERE id=? AND status='processing'",
+                    (CheckpointMismatch.MESSAGE, time.time(), row["id"]),
+                )
         except Exception:
             logger.exception("Transcription job %s failed", row["id"])
             with self._db() as db:
@@ -273,10 +284,14 @@ class JobQueue:
                 )
         else:
             with self._db() as db:
-                db.execute(
+                updated = db.execute(
                     "UPDATE jobs SET status='completed', transcript=?, error=NULL, finished_at=? WHERE id=? AND status='processing'",
                     (text, time.time(), row["id"]),
                 )
+                if updated.rowcount:
+                    db.execute(
+                        "DELETE FROM job_checkpoints WHERE job_id=?", (row["id"],)
+                    )
         finally:
             with self._db() as db:
                 db.execute(
@@ -298,6 +313,12 @@ class JobQueue:
 
     @staticmethod
     def _public(row) -> dict:
+        completed, total = row["completed_chunks"], row["total_chunks"]
+        retryable = (
+            row["status"] in {"failed", "cancelled"}
+            and Path(row["input_path"]).is_file()
+        )
+        restart_required = row["error"] == CheckpointMismatch.MESSAGE
         return {
             key: row[key]
             for key in (
@@ -313,14 +334,19 @@ class JobQueue:
             )
         } | {
             "interrupted": bool(row["interrupted"]),
-            "retryable": row["status"] in {"failed", "cancelled"}
-            and Path(row["input_path"]).is_file(),
+            "retryable": retryable,
+            "progress": {"completed_chunks": completed, "total_chunks": total},
+            "resumable": retryable and completed > 0 and not restart_required,
+            "restart_required": restart_required,
         }
 
     _select = """SELECT id, owner, filename, status, input_path, created_at, queued_at, started_at, finished_at, error, interrupted,
         CASE WHEN status='queued' THEN (SELECT COUNT(*) FROM jobs q WHERE q.status='queued'
           AND (q.queued_at < jobs.queued_at OR (q.queued_at = jobs.queued_at AND q.sequence <= jobs.sequence)))
-        ELSE 0 END AS queue_position FROM jobs"""
+        ELSE 0 END AS queue_position,
+        CASE WHEN json_valid(job_checkpoints.plan) THEN json_array_length(job_checkpoints.plan) ELSE 0 END AS total_chunks,
+        CASE WHEN json_valid(job_checkpoints.completed) THEN (SELECT COUNT(*) FROM json_each(job_checkpoints.completed)) ELSE 0 END AS completed_chunks FROM jobs
+        LEFT JOIN job_checkpoints ON job_checkpoints.job_id=jobs.id"""
 
     def get(self, job_id: str, owner: str) -> dict:
         with self._db() as db:
@@ -361,7 +387,7 @@ class JobQueue:
             raise JobConflict("The transcript is not ready yet.")
         return row["transcript"]
 
-    def retry(self, job_id: str, owner: str) -> dict:
+    def retry(self, job_id: str, owner: str, restart: bool = False) -> dict:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -378,6 +404,8 @@ class JobQueue:
                     "This job cannot be retried. Upload the recording again."
                 )
             self._check_capacity(db)
+            if restart:
+                db.execute("DELETE FROM job_checkpoints WHERE job_id=?", (job_id,))
             db.execute(
                 "UPDATE jobs SET status='queued', queued_at=?, started_at=NULL, finished_at=NULL, error=NULL, interrupted=0 WHERE id=?",
                 (time.time(), job_id),
@@ -418,6 +446,7 @@ class JobQueue:
                 raise JobConflict(
                     "A processing job cannot be removed until it finishes."
                 )
+            db.execute("DELETE FROM job_checkpoints WHERE job_id=?", (job_id,))
             db.execute("DELETE FROM jobs WHERE id=?", (job_id,))
         Path(row["input_path"]).unlink(missing_ok=True)
 
@@ -426,8 +455,9 @@ class JobQueue:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = db.execute(
-                "SELECT input_path FROM jobs WHERE status='completed' OR (status IN ('failed', 'cancelled') AND finished_at<?)",
+                "SELECT id, input_path FROM jobs WHERE status='completed' OR (status IN ('failed', 'cancelled') AND finished_at<?)",
                 (time.time() - FAILED_UPLOAD_TTL,),
             ).fetchall()
             for row in rows:
                 Path(row["input_path"]).unlink(missing_ok=True)
+                db.execute("DELETE FROM job_checkpoints WHERE job_id=?", (row["id"],))

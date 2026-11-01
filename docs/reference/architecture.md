@@ -30,6 +30,7 @@ apps/
       jobs.py                Recording submission and provider calls
       queue.py               Persistent SQLite queue and worker threads
       execution.py           Per-job subprocess supervision and cancellation
+      checkpoints.py         Durable chunk results and resume validation
       worker.py              Private Django-aware transcription subprocess
       runtime.py             Process lifecycle for the queue
       pipeline.py            Audio conversion and Gemini transcription engine
@@ -49,6 +50,8 @@ tests/                       Project integration, migration, and frontend tests
 `ModelProvider` is a managed Django model for administrator-defined Gemini and OpenAI-compatible services. Credentials are encrypted through `common/credentials.py`. Jobs save the selected provider ID in their existing settings JSON; existing jobs retain environment Gemini behavior. See the [provider guide](../guides/model-providers.md).
 
 Each transcription runs in an isolated subprocess supervised by one queue thread. A cancellation request atomically changes `processing` to `cancelling`; supervision stops the job's process group, including audio conversion children, before marking it `cancelled` and releasing the worker slot. Completion updates only a still-processing job, preventing a late response from overwriting cancellation. Cancelled jobs retain their history and retry keys, and their recordings expire after 24 hours. Server shutdown stops subprocesses and preserves interrupted jobs for retry. The standalone CLI keeps its existing direct execution path.
+
+The managed `JobCheckpoint` model stores a per-job chunk manifest and completed text in `job_checkpoints`. All three provider adapters use the same chunk runner. Each success commits atomically after checking that the job is still processing in the same attempt; cancelled or obsolete workers cannot append late results. SHA-256 fingerprints cover source audio and request configuration, while the manifest records chunk offsets and content digests. API keys are excluded. Retry rebuilds temporary audio and reuses matching saved text, then publishes the ordered final transcript. Explicit restart clears saved progress. Success, deletion, and recording expiry remove checkpoints. Migration 0007 also accommodates queue databases initialized before Django migrations run.
 
 Environment settings are described in the [configuration guide](../guides/configuration.md). The settings package keeps `BASE_DIR` at the repository root; development and production use the same configured data directory and persistent signing key. The queue uses the selected settings' `DATA_DIR`, while tests use temporary storage.
 

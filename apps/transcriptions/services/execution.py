@@ -82,6 +82,12 @@ def run_isolated(parameters):
                     except subprocess.TimeoutExpired:
                         payload = None
                 check_cancelled()
+                if process.returncode == 2:
+                    from .checkpoints import CheckpointMismatch
+
+                    output.seek(0)
+                    if json.load(output) == {"error": "checkpoint_mismatch"}:
+                        raise CheckpointMismatch()
                 if process.returncode:
                     raise RuntimeError(
                         "Transcription worker failed. Check provider configuration."

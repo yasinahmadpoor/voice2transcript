@@ -1,6 +1,7 @@
 """HTTP views for recording uploads, job history, and transcripts."""
 
 import time
+import json
 
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
@@ -72,7 +73,28 @@ def job_result(request, job_id):
 
 @methods("POST")
 def retry_job(request, job_id):
-    return JsonResponse(get_queue().retry(job_id, request.account), status=202)
+    restart = False
+    if request.content_type == "multipart/form-data":
+        # Existing clients may POST an empty multipart form to retry.
+        if request.POST or request.FILES:
+            raise APIError(422, "Expected JSON with an optional boolean restart field.")
+    elif request.body:
+        try:
+            options = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise APIError(
+                422, "Expected JSON with an optional boolean restart field."
+            ) from None
+        if (
+            not isinstance(options, dict)
+            or set(options) - {"restart"}
+            or type(options.get("restart", False)) is not bool
+        ):
+            raise APIError(422, "Expected JSON with an optional boolean restart field.")
+        restart = options.get("restart", False)
+    return JsonResponse(
+        get_queue().retry(job_id, request.account, restart=restart), status=202
+    )
 
 
 @methods("POST")

@@ -86,6 +86,16 @@ class ModelProvider(models.Model):
         self.is_default = True
 
 
+class JobCheckpoint(models.Model):
+    job_id = models.CharField(max_length=32, primary_key=True)
+    fingerprint = models.CharField(max_length=64)
+    plan = models.JSONField()
+    completed = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "job_checkpoints"
+
+
 class TranscriptionJob(models.Model):
     sequence = models.AutoField(primary_key=True)
     id = models.CharField(max_length=32, unique=True)

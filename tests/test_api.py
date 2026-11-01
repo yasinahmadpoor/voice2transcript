@@ -637,6 +637,101 @@ class WebTests(TransactionTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "Transcription was cancelled.")
 
+    def test_retry_resumes_saved_chunks_and_explicit_restart_discards_them(self):
+        from apps.transcriptions.services.checkpoints import (
+            ChunkCheckpoint,
+            current_checkpoint,
+            transcribe_chunks,
+        )
+
+        self.login()
+        chunks = []
+        for index in range(3):
+            path = Path(self.data_dir.name) / f"chunk{index}.wav"
+            path.write_bytes(f"audio{index}".encode())
+            chunks.append((path, float(index)))
+        calls = []
+        configuration = {"model": "primary"}
+
+        def transcribe(path):
+            index = int(path.stem[-1])
+            calls.append(index)
+            if calls == [0, 1]:
+                raise RuntimeError("Synthetic failure")
+            return f"Saved chunk {index}"
+
+        def runner(path, *args):
+            return transcribe_chunks(
+                chunks,
+                transcribe,
+                ChunkCheckpoint(current_checkpoint(), path, configuration),
+            )
+
+        with (
+            patch.object(api, "run_pipeline", side_effect=runner),
+            patch("apps.transcriptions.services.queue.logger.exception"),
+        ):
+            for restart in (False, True):
+                calls.clear()
+                configuration["model"] = "primary"
+                job_id = self.client.post(
+                    "/jobs", data={"file": SimpleUploadedFile("Resume.wav", b"audio")}
+                ).json()["id"]
+                failed = self.wait_for_job(job_id)
+                self.assertEqual(
+                    failed["progress"], {"completed_chunks": 1, "total_chunks": 3}
+                )
+                self.assertTrue(failed["resumable"])
+                self.assertNotIn("Saved chunk", json.dumps(failed))
+                for body in (
+                    "{",
+                    "[]",
+                    '{"restart":"yes"}',
+                    '{"restart":1}',
+                    '{"unexpected":true}',
+                ):
+                    self.assertEqual(
+                        self.client.post(
+                            f"/jobs/{job_id}/retry",
+                            data=body,
+                            content_type="application/json",
+                        ).status_code,
+                        422,
+                    )
+                other = Client()
+                other.force_login(
+                    get_user_model().objects.get_or_create(username="resume-other")[0]
+                )
+                self.assertEqual(
+                    other.post(
+                        f"/jobs/{job_id}/retry",
+                        data='{"restart":true}',
+                        content_type="application/json",
+                    ).status_code,
+                    404,
+                )
+                if restart:
+                    configuration["model"] = "changed"
+                    self.client.post(f"/jobs/{job_id}/retry")
+                    mismatch = self.wait_for_job(job_id)
+                    self.assertTrue(mismatch["restart_required"])
+                    self.assertFalse(mismatch["resumable"])
+                options = (
+                    {"data": '{"restart":true}', "content_type": "application/json"}
+                    if restart
+                    else {}
+                )
+                self.assertEqual(
+                    self.client.post(f"/jobs/{job_id}/retry", **options).status_code,
+                    202,
+                )
+                self.assertEqual(self.wait_for_job(job_id)["status"], "completed")
+                self.assertEqual(calls, [0, 1, 0, 1, 2] if restart else [0, 1, 1, 2])
+                self.assertEqual(
+                    self.client.get(f"/jobs/{job_id}/result").text,
+                    "Saved chunk 0\n\nSaved chunk 1\n\nSaved chunk 2",
+                )
+
     def test_background_job_status_result_and_delete(self):
         self.login()
         with patch.object(

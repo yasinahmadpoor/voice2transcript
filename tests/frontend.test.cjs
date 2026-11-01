@@ -26,6 +26,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   const retryKeys = new Map();
   const uploadHeaders = [];
   const deletions = [];
+  const retries = [];
   const storage = new Map(saved ? [['voice-selected-job:42', saved]] : []);
   if (theme) storage.set('voice-theme', theme);
   function get(id) {
@@ -104,7 +105,9 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
       if (!job) return { ok: false, status: 404, json: async () => ({detail:'Job not found.'}) };
       if (action === 'result') return { ok: true, text: async () => job.transcript || 'SPEAKER_1: Test transcript' };
       if (action === 'retry') {
-        Object.assign(job, {status:'queued', retryable:false, interrupted:false, queue_position:1});
+        retries.push({id,options});
+        if (options?.body && JSON.parse(options.body).restart) job.progress = {completed_chunks:0,total_chunks:0};
+        Object.assign(job, {status:'queued', retryable:false, resumable:false, restart_required:false, interrupted:false, queue_position:1});
         return {ok:true,json:async () => structuredClone(job)};
       }
       if (action === 'cancel') {
@@ -128,7 +131,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   vm.runInContext(languageSource, context);
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { get, inputs, requests, timers, storage, uploadHeaders, deletions, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
+  return { get, inputs, requests, timers, storage, uploadHeaders, deletions, retries, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
 }
 
 test('shared theme defaults to dark, toggles, and restores a saved preference', async () => {
@@ -330,6 +333,28 @@ test('deleting requires explicit confirmation and cancel or Escape keeps the tra
   assert.equal(blocked, false);
   get('delete-dialog').close();
   assert.equal(deletions.length, 0);
+});
+
+test('failed jobs show chunk progress and resume by default with a separate restart action', async () => {
+  const job = {id:'partial',filename:'Partial.wav',status:'failed',created_at:1,retryable:true,resumable:true,progress:{completed_chunks:2,total_chunks:5}};
+  const {get,jobs,setJobs,retries} = await workspace({jobs:[job]});
+  assert.equal(get('chunk-progress').hidden, false);
+  assert.match(get('chunk-progress').textContent, /2 of 5/);
+  assert.equal(get('retry-job').textContent, 'Resume transcription');
+  assert.equal(get('restart-job').hidden, false);
+  await get('retry-job').listeners.click();
+  assert.equal(retries[0].options.body, undefined);
+  assert.equal(jobs()[0].progress.completed_chunks, 2);
+  setJobs([{...job,restart_required:true,resumable:false}]);
+  await get('refresh-jobs').listeners.click();
+  assert.equal(get('retry-job').hidden, true);
+  assert.equal(get('restart-job').hidden, false);
+  await get('restart-job').listeners.click();
+  assert.deepEqual(JSON.parse(retries[1].options.body), {restart:true});
+  assert.equal(jobs()[0].progress.completed_chunks, 0);
+  setJobs([{...job,restart_required:true,resumable:false,progress:{completed_chunks:0,total_chunks:0}}]);
+  await get('refresh-jobs').listeners.click();
+  assert.equal(get('restart-job').hidden, false);
 });
 
 test('confirmation deletes the captured recording even if the selected job changes', async () => {

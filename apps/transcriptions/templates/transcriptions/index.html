@@ -90,6 +90,7 @@
 
         <section id="transcript-panel" class="panel transcript-panel" aria-labelledby="transcript-heading">
           <div class="panel-header"><span class="step-number">02</span><h2 id="transcript-heading">Your transcript</h2><span id="result-badge" class="result-badge" hidden>READY</span></div>
+          <p id="chunk-progress" class="chunk-progress" role="status" hidden></p>
           <div id="empty-result" class="empty-result"><div class="document-art" aria-hidden="true"><span></span><span></span><span></span><span></span></div><h3>A blank page, for now.</h3><p>Your conversation will appear here,<br>one speaker at a time.</p></div>
           <div id="processing" class="processing" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><h3 id="processing-title">Finding the words…</h3><p id="processing-description">Your job continues if you close this page. Reopen it to check the result.</p><span id="elapsed" class="elapsed">0:00 elapsed</span><button id="cancel-job" class="secondary-button" type="button">Cancel transcription</button></div>
           <div id="job-failure" class="job-failure" role="alert" hidden><h3>Unable to finish this recording.</h3><p id="job-error"></p><button id="retry-job" class="secondary-button" type="button" hidden>Retry transcription</button></div>
@@ -103,7 +104,7 @@
         <p id="jobs-error" class="error" role="status" hidden></p>
         <p id="jobs-empty" class="jobs-empty">Your queued and completed recordings will appear here.</p>
         <div id="jobs-list" class="jobs-list"></div>
-        <div id="job-actions" class="job-actions" hidden><span id="selected-job-note"></span><button id="cancel-selected-job" class="secondary-button" type="button" hidden>Cancel transcription</button><button id="delete-job" class="quiet-button" type="button">Remove recording</button></div>
+        <div id="job-actions" class="job-actions" hidden><span id="selected-job-note"></span><button id="cancel-selected-job" class="secondary-button" type="button" hidden>Cancel transcription</button><button id="restart-job" class="secondary-button" type="button" hidden>Restart from beginning</button><button id="delete-job" class="quiet-button" type="button">Remove recording</button></div>
       </section>
       <p class="workspace-tip"><span aria-hidden="true">✦</span> For clearer results, use recordings with less background noise.</p>
     </section>
