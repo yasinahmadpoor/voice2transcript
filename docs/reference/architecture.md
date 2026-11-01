@@ -4,6 +4,9 @@
 
 ```text
 docs/                        Guides, reference, and development documentation
+pyproject.toml               Project metadata and direct dependencies
+uv.lock                      Resolved dependency versions and hashes
+.python-version              Default Python version for uv (3.12)
 manage.py                    Django management entry point
 config/                      Project settings, root URLs, WSGI, signing key
 templates/                   Shared page layout for all apps
@@ -28,7 +31,7 @@ apps/
     tests/                   Queue unit tests
 common/                      Shared HTTP, middleware, and environment helpers
 scripts/                     Standalone CLI entry points
-  transcribe.py              python -m scripts.transcribe --help
+  transcribe.py              uv run --locked python -m scripts.transcribe --help
   bootstrap_login.py         Initial legacy-bootstrap helper
 tests/                       Project integration, migration, and frontend tests
 ```
@@ -41,7 +44,7 @@ The transcription app keeps its historical Django **app label** `web` while its 
 
 Shared styles and theme behavior live in project-root `static/`, configured through `STATICFILES_DIRS`, and are loaded by `base.html` for every page that extends it. Transcription-specific JavaScript stays in the app at `/static/transcriptions/app.js`. Django's project and app static-file finders discover both locations, and WhiteNoise serves the assets. Docker includes both directories and runs `collectstatic` during the build.
 
-Existing `.env`, signing key, users, job IDs, files, results, and retry keys remain compatible. Django migrations retain the established queue table. Old FastAPI startup commands must use the Gunicorn command above. `DJANGO_SECRET_KEY` can supply a stable signing key; otherwise one is privately generated at `JOB_DATA_DIR/.django-secret-key` and reused across restarts. Keep this key and database together in backups.
+Existing `.env`, signing key, users, job IDs, files, results, and retry keys remain compatible. Django migrations retain the established queue table. Old FastAPI startup commands must use the Gunicorn command in the local setup guide. `DJANGO_SECRET_KEY` can supply a stable signing key; otherwise one is privately generated at `JOB_DATA_DIR/.django-secret-key` and reused across restarts. Keep this key and database together in backups.
 
 Deployment references: [Django and Gunicorn](https://docs.djangoproject.com/en/5.2/howto/deployment/wsgi/gunicorn/), [WhiteNoise static files](https://whitenoise.readthedocs.io/en/stable/django.html).
 

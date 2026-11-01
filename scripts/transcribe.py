@@ -1,4 +1,4 @@
-"""Command-line transcription: python -m scripts.transcribe --help."""
+"""Command-line transcription: uv run --locked python -m scripts.transcribe --help."""
 
 import argparse
 from pathlib import Path

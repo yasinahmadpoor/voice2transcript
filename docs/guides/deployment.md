@@ -4,6 +4,8 @@
 
 Run all commands from the repository root.
 
+The Docker image uses pinned uv 0.9.9 to run `uv sync --locked --no-dev` from `pyproject.toml` and `uv.lock`. Its own `/app/.venv` is on `PATH`, so container management commands use `python` directly and Gunicorn starts without resolving packages at runtime. Host Python and uv installations are not required for Docker.
+
 Configure `.env` with your Gemini key, then start the container:
 
 ```sh
@@ -16,7 +18,7 @@ Open <http://localhost:8000>. The `transcription-data` Docker volume stores SQLi
 
 For deployment, terminate HTTPS at your reverse proxy and set `SECURE_COOKIES=true`. Add your hostname or server IP to `DJANGO_ALLOWED_HOSTS` (comma-separated, without schemes or ports). Forward the original host and scheme to Gunicorn, and set `FORWARDED_ALLOW_IPS` to your proxy's source IPs; Gunicorn only accepts scheme headers from trusted proxies. Direct local HTTP needs no proxy configuration. The app is designed for a small, multi-user deployment with **one Gunicorn worker process with eight HTTP threads**. A process lock prevents multiple queue processes from sharing a data directory. `TRANSCRIPTION_WORKERS` controls the dedicated transcription threads inside that process, independently of the web server's thread pool. It defaults to `2` (range 1–16). `MAX_PENDING_JOBS` defaults to `20`, including queued and processing jobs; a full queue returns HTTP 429. All jobs, including legacy `/transcribe` requests, share these workers.
 
-Use the supplied Gunicorn configuration; do not enable preloading, multiple worker processes, or worker recycling while using the embedded queue. The queue starts when the WSGI serving process starts, resumes queued jobs before accepting requests, and shuts down with that process. Django management commands do not start transcription workers. `python manage.py runserver --noreload` is also available for local development; Gunicorn is the production entry point.
+Use the supplied Gunicorn configuration; do not enable preloading, multiple worker processes, or worker recycling while using the embedded queue. The queue starts when the WSGI serving process starts, resumes queued jobs before accepting requests, and shuts down with that process. Django management commands do not start transcription workers. `uv run --locked python manage.py runserver --noreload` is also available for local development; Gunicorn is the production entry point.
 
 Frontend and admin use the same Django session, stored in SQLite for up to 12 hours and preserved across restarts. Signing out revokes that browser session for both interfaces. Disabling an account, deleting it, or changing its password blocks existing sessions. Sign in once after upgrading from the previous authentication system. Login is limited to five attempts per minute per client IP. `MAX_UPLOAD_MB` defaults to `500`; configure your reverse proxy's upload limit accordingly.
 

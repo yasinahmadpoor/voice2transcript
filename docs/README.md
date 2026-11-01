@@ -16,6 +16,7 @@
 
 ## Development
 
+- [Dependency management](development/dependencies.md): uv setup, lockfiles, and dependency updates.
 - [Testing and command-line tools](development/testing.md): verification commands and standalone transcription.
 
 Shell commands in these guides run from the repository root, unless stated otherwise. Start environment configuration with [`.env.example`](../.env.example).
