@@ -24,9 +24,14 @@ def main():
         from .jobs import execute_pipeline
 
         parameters = json.load(sys.stdin)
-        parameters["input_path"] = Path(parameters["input_path"])
         with redirect_stdout(sys.stderr):
-            result = execute_pipeline(**parameters)
+            if "connection_test_provider" in parameters:
+                from .connection_test import execute_connection_test
+
+                result = json.dumps(execute_connection_test(parameters["connection_test_provider"]))
+            else:
+                parameters["input_path"] = Path(parameters["input_path"])
+                result = execute_pipeline(**parameters)
         json.dump(result, sys.stdout)
     except CheckpointMismatch:
         json.dump({"error": "checkpoint_mismatch"}, sys.stdout)

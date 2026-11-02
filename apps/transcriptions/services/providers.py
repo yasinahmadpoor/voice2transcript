@@ -156,6 +156,8 @@ def transcribe_openai(
     fallback_model,
     prompt,
     checkpoint=None,
+    *,
+    request_timeout=600,
 ):
     key = provider.get_api_key()
     headers = {"Authorization": f"Bearer {key}"} if key else {}
@@ -167,7 +169,7 @@ def transcribe_openai(
         chunks = split_wav(wav, minutes)
         with httpx.Client(
             headers=headers,
-            timeout=httpx.Timeout(600, connect=30),
+            timeout=httpx.Timeout(request_timeout, connect=min(30, request_timeout)),
             follow_redirects=False,
         ) as client:
 

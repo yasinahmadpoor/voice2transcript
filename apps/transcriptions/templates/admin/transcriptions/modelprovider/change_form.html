@@ -1,0 +1,29 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<script src="{% static 'transcriptions/provider-test.js' %}" defer></script>
+{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'transcriptions/provider-test.css' %}">
+{% endblock %}
+
+{% block content %}
+{% if change and original and has_change_permission %}
+<div class="module provider-connection-test">
+  <h2>Test model connection</h2>
+  <div class="provider-test-body">
+    <p>Tests the saved primary model, <strong>{{ original.model }}</strong>, using a 2-second synthetic English recording. This sends a small audio request and may incur a small charge. The fallback model is not tested.</p>
+    <form id="provider-test-form" method="post" action="{% url 'admin:web_modelprovider_test_connection' original.pk %}">
+      {% csrf_token %}
+      <button id="provider-test-button" type="submit" class="button">Test connection</button>
+    </form>
+    <p id="provider-test-result" role="status" aria-live="polite">Uses saved settings. Save and continue editing before testing changes. The test stops after 30 seconds.</p>
+  </div>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}

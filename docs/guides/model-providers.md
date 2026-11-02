@@ -17,6 +17,36 @@ To switch the default later, select exactly one enabled provider in the list and
 
 Providers are disabled rather than deleted, preserving their identity for queued and failed jobs. Choose another default, or restore environment Gemini, before disabling the current default. Disabled providers disappear from the frontend and cannot execute new work or retries until enabled again.
 
+## Test a connection
+
+Open a saved provider in admin and click **Test connection**. After editing a key,
+URL, or model, use **Save and continue editing** first. The button uses saved
+settings and is disabled while the form has unsaved changes or a test is running.
+Disabled providers can also be tested before enabling them.
+
+The test sends a bundled 2.2-second synthetic English recording saying “Hello,
+this is a transcription test.” through the same audio adapter as normal jobs.
+It tests the saved primary model only, with no fallback. Direct Google Gemini
+uses the existing Files API path; Gemini proxies use inline audio; compatible
+providers use `/audio/transcriptions`. A successful result means the model
+returned a nonempty transcript; it does not measure transcription accuracy or
+guarantee support for longer recordings or every language.
+
+The result appears on the page with elapsed time. Errors distinguish rejected
+credentials, access restrictions, an unknown endpoint/model, quota or payment
+issues, network errors, invalid responses, and timeouts where the provider's
+response allows it. Tests stop after 30 seconds, with at most one active test
+per server process. They do not create jobs, history, or checkpoints, and do not
+change provider settings. The sample transcript is discarded. Only superusers
+can run tests; keys and raw provider errors are never returned to the browser.
+
+Each click makes a real audio request and may incur a small provider charge.
+Stopping a timed-out local test cannot cancel work already accepted by a remote
+provider. The sample is stored in
+`apps/transcriptions/fixtures/connection-test.wav`; generation instructions and
+provenance are in that directory's README. No speech-generation dependency is
+needed in production.
+
 ## Gemini through Metis
 
 Create a key in [Metis Console](https://console.metisai.ir/) and add a provider with these settings:

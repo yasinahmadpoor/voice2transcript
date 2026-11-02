@@ -1,0 +1,33 @@
+.provider-test-body {
+  padding: 4px 12px 12px;
+}
+
+.provider-test-body p {
+  max-width: 75ch;
+  margin: 12px 0;
+  padding: 0;
+}
+
+#provider-test-form {
+  margin: 12px 0;
+}
+
+#provider-test-button {
+  min-height: 40px;
+  padding: 10px 15px;
+}
+
+#provider-test-result[data-result="success"] {
+  color: var(--body-fg);
+  border-left: 4px solid var(--primary);
+  padding-left: 10px;
+}
+
+#provider-test-result[data-result="error"] {
+  color: var(--error-fg);
+}
+
+#provider-test-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

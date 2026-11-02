@@ -1,10 +1,17 @@
 """Inspect jobs and use queue operations without editing live worker state."""
 
 from datetime import UTC, datetime
+from threading import Lock
 
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.db.models import Q
+from django.core.exceptions import PermissionDenied
+from django.http import Http404, JsonResponse
+from django.shortcuts import redirect
+from django.urls import path, reverse
+from django.utils.decorators import method_decorator
+from django.views.decorators.http import require_POST
 
 from apps.transcriptions.services.queue import JobConflict, JobNotFound, QueueFull
 
@@ -12,6 +19,9 @@ from .models import TranscriptionJob
 from .models import ModelProvider
 from .forms import ModelProviderAdminForm
 from .services.runtime import get_queue
+from .services.connection_test import check_connection
+
+_connection_test_lock = Lock()
 
 admin.site.site_header = "Voice to Transcript administration"
 admin.site.site_title = "Voice to Transcript"
@@ -21,6 +31,7 @@ admin.site.index_title = "Administration"
 @admin.register(ModelProvider)
 class ModelProviderAdmin(admin.ModelAdmin):
     form = ModelProviderAdminForm
+    change_form_template = "admin/transcriptions/modelprovider/change_form.html"
     list_display = ["name", "kind", "model", "is_enabled", "is_default", "has_api_key"]
     readonly_fields = ["is_default", "has_api_key"]
     fields = [
@@ -36,6 +47,43 @@ class ModelProviderAdmin(admin.ModelAdmin):
         "is_default",
     ]
     actions = ["use_as_default", "use_environment_default"]
+
+    def get_urls(self):
+        return [
+            path(
+                "<int:object_id>/test-connection/",
+                self.admin_site.admin_view(self.test_connection),
+                name="web_modelprovider_test_connection",
+            ),
+        ] + super().get_urls()
+
+    @method_decorator(require_POST)
+    def test_connection(self, request, object_id):
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        provider = self.get_object(request, str(object_id))
+        if provider is None:
+            raise Http404
+        status = 200
+        if not _connection_test_lock.acquire(blocking=False):
+            result = {
+                "ok": False,
+                "message": "Another model connection test is running. Try again shortly.",
+            }
+            status = 429
+        else:
+            try:
+                result = check_connection(provider)
+            finally:
+                _connection_test_lock.release()
+        if request.headers.get("Accept") == "application/json":
+            return JsonResponse(result, status=status)
+        self.message_user(
+            request,
+            result["message"],
+            messages.SUCCESS if result["ok"] else messages.ERROR,
+        )
+        return redirect(reverse("admin:web_modelprovider_change", args=[provider.pk]))
 
     def has_module_permission(self, request):
         return request.user.is_superuser
