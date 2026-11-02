@@ -37,6 +37,12 @@ OPERATIONS = {
         "delete": ("Remove a recording", "204"),
     },
     "/jobs/{job_id}/result": {"get": ("Download transcript", "200")},
+    "/jobs/{job_id}/export": {
+        "post": (
+            "Download a styled Word or PDF transcript, optionally with edited text",
+            "200",
+        )
+    },
     "/jobs/{job_id}/context": {
         "get": ("Read the owner's saved meeting details and prompt snapshot", "200")
     },
@@ -150,6 +156,52 @@ def openapi(request):
                         "schema": {"$ref": "#/components/schemas/SavedContext"}
                     }
                 }
+            if path == "/jobs/{job_id}/export":
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["format"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "format": {
+                                        "type": "string",
+                                        "enum": ["docx", "pdf"],
+                                    },
+                                    "text": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 100000,
+                                        "description": "Optional edited transcript. Omit to use the saved result. Edits are not persisted.",
+                                    },
+                                },
+                            }
+                        }
+                    },
+                }
+                operation["responses"][status]["content"] = {
+                    mime: {"schema": {"type": "string", "format": "binary"}}
+                    for mime in (
+                        "application/pdf",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                }
+                operation["responses"].update(
+                    {
+                        str(code): {"description": description}
+                        for code, description in (
+                            (401, "Sign in required"),
+                            (404, "Job not found"),
+                            (409, "Transcript not ready"),
+                            (422, "Invalid format or text"),
+                            (429, "Export busy; retry shortly"),
+                            (503, "Generation failed"),
+                            (504, "Generation timed out"),
+                        )
+                    }
+                )
             if path == "/auth/login":
                 operation["requestBody"] = {
                     "required": True,

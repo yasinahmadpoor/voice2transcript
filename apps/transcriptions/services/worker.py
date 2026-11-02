@@ -25,10 +25,19 @@ def main():
 
         parameters = json.load(sys.stdin)
         with redirect_stdout(sys.stderr):
-            if "connection_test_provider" in parameters:
+            if "document_export" in parameters:
+                import base64
+                from .exports import render_export
+
+                result = base64.b64encode(
+                    render_export(**parameters["document_export"])
+                ).decode("ascii")
+            elif "connection_test_provider" in parameters:
                 from .connection_test import execute_connection_test
 
-                result = json.dumps(execute_connection_test(parameters["connection_test_provider"]))
+                result = json.dumps(
+                    execute_connection_test(parameters["connection_test_provider"])
+                )
             else:
                 parameters["input_path"] = Path(parameters["input_path"])
                 result = execute_pipeline(**parameters)

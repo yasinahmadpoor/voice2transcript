@@ -71,3 +71,11 @@ Deployment references: [Django and Gunicorn](https://docs.djangoproject.com/en/5
 
 - [Docker and deployment](../guides/deployment.md)
 - [Testing and command-line tools](../development/testing.md)
+
+Styled Word/PDF exports live in `apps/transcriptions/services/exports.py` and
+share a theme with the print-only `transcriptions/export.html` template. Word uses
+python-docx and embeds the bundled Vazirmatn fonts; PDF uses WeasyPrint/Pango with
+bundled fonts and an allowlist-only resource fetcher. Transcript text is escaped
+and remains literal. An owner-authenticated completed-job endpoint accepts optional
+editor text, without saving edits. A separate 45-second child process and a
+nonblocking per-process export lock bound generation independently of STT workers.

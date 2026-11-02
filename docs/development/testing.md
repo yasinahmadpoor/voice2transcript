@@ -24,3 +24,22 @@ The tests stub providers or run a local HTTP transcription server, so they do no
 - [Dependency management](dependencies.md)
 - [Local setup](../guides/getting-started.md)
 - [Architecture](../reference/architecture.md)
+
+Export tests (`tests/test_exports.py`) exercise both real document renderers and
+the bounded child worker, Word text/RTL properties and embedded font recovery,
+PDF font embedding, literal markup and blocked resources, ownership, validation,
+immutable saved text, busy slots, and timeout cleanup. Frontend tests verify edited
+text, download names, duplicate prevention, errors, expired sessions, and stale
+responses after logout or changing the selected recording. Visual QA should render
+synthetic Persian/English Word and PDF samples, including multiple pages, before
+changing document styles. No provider call is needed.
+
+For local PDF generation on Debian/Ubuntu install the native libraries with
+`sudo apt-get install libpango-1.0-0 libpangoft2-1.0-0` before `uv sync --locked`.
+Large Persian transcript regression tests also exercise worker input larger than
+64 KB for both formats. Workers read from a private anonymous temporary file,
+so input cannot stall on a partially written pipe while the parent polls for
+cancellation or timeout.
+
+The Docker image installs these libraries automatically; fonts and their license
+are in `apps/transcriptions/assets/fonts/`.

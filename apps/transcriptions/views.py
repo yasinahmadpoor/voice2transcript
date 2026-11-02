@@ -2,9 +2,11 @@
 
 import time
 import json
+import unicodedata
 
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.utils.http import content_disposition_header
 
 from common.http import APIError, methods, validated
 
@@ -100,6 +102,60 @@ def transcript_response(text):
 @methods("GET")
 def job_result(request, job_id):
     return transcript_response(get_queue().result(job_id, request.account))
+
+
+@methods("POST")
+def job_export(request, job_id):
+    from .services.exports import (
+        EXPORT_TYPES,
+        MAX_EXPORT_CHARACTERS,
+        export_filename,
+        generate_export,
+    )
+
+    queue = get_queue()
+    job = queue.get(job_id, request.account)
+    if job["status"] != "completed":
+        raise APIError(409, "The transcript is not ready yet.")
+    try:
+        data = json.loads(request.body)
+    except (ValueError, UnicodeDecodeError):
+        raise APIError(422, "Expected JSON with format and optional text.") from None
+    if (
+        not isinstance(data, dict)
+        or set(data) - {"format", "text"}
+        or data.get("format") not in ("docx", "pdf")
+        or ("text" in data and not isinstance(data["text"], str))
+    ):
+        raise APIError(422, "Choose docx or pdf and provide text as a string.")
+    text = data["text"] if "text" in data else queue.result(job_id, request.account)
+    if not text.strip():
+        raise APIError(422, "The transcript is empty.")
+    if len(text) > MAX_EXPORT_CHARACTERS:
+        raise APIError(
+            422,
+            f"Word and PDF exports support up to {MAX_EXPORT_CHARACTERS:,} characters. Download TXT for longer transcripts.",
+        )
+    if any(
+        unicodedata.category(char) == "Cs"
+        or (ord(char) < 32 and char not in "\n\r\t")
+        or ord(char) in (0xFFFE, 0xFFFF)
+        for char in text
+    ):
+        raise APIError(422, "The transcript contains unsupported control characters.")
+    format = data["format"]
+    document = generate_export(
+        format, text, job["filename"], job["finished_at"] or job["created_at"]
+    )
+    return HttpResponse(
+        document,
+        content_type=EXPORT_TYPES[format],
+        headers={
+            "Content-Disposition": content_disposition_header(
+                True, export_filename(job["filename"], format)
+            ),
+        },
+    )
 
 
 @methods("GET")

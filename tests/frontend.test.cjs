@@ -18,7 +18,7 @@ const defaults = {
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
 
-async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, onDelete = null, onPreview = null, onContext = null, theme = null } = {}) {
+async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, onDelete = null, onPreview = null, onContext = null, onExport = null, theme = null } = {}) {
   const elements = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -38,6 +38,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
         addEventListener(event, callback) { this.listeners[event] = callback; },
         classList: { toggle() {}, add() {}, remove() {} },
         pause() {}, load() {}, focus() { this.focused = true; }, select() {}, scrollIntoView() {},
+        click() { if (this.download) downloads.push(this.download); },
         showModal() { this.open = true; },
         close() { this.open = false; this.listeners.close?.(); },
         removeAttribute(name) { delete this.attributes[name]; },
@@ -72,11 +73,13 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   const requests = [];
   const previews = [];
   const contextRequests = [];
+  const exports = [];
+  const downloads = [];
   const context = vm.createContext({
     document: { readyState: 'complete', getElementById: get, querySelectorAll: () => inputs, createElement: () => get(`created-${++elementId}`), documentElement: {dataset:{theme:'dark'}}, querySelector: () => get('theme-meta') },
     window: { addEventListener() {} },
     localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    FormData: MultipartData, AbortController, crypto:webcrypto,
+    FormData: MultipartData, Blob, AbortController, crypto:webcrypto,
     setTimeout: callback => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: id => timers.delete(id),
     URL: { createObjectURL: () => 'blob:preview', revokeObjectURL() {} },
@@ -108,6 +111,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
       const [, , id, action] = url.split('/');
       const job = serverJobs.find(item => item.id === id);
       if (!job) return { ok: false, status: 404, json: async () => ({detail:'Job not found.'}) };
+      if (action === 'export') { const body = JSON.parse(options.body); exports.push({id,body}); return onExport ? onExport(job, options) : {ok:true,blob:async () => new Blob(['document'])}; }
       if (action === 'context') { contextRequests.push(id); return onContext ? onContext(job,options) : {ok:true,json:async () => job.context || {meeting_description:'',participants:[],prompt:'Original',effective_prompt:'Original'}}; }
       if (action === 'result') return { ok: true, text: async () => job.transcript || 'SPEAKER_1: Test transcript' };
       if (action === 'retry') {
@@ -138,7 +142,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   vm.runInContext(meetingSource, context);
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { get, inputs, requests, previews, contextRequests, participants: () => get('participant-list').children.map(card => ({ name: card.children[2], description: card.children[4], remove: card.children[0].children[1] })), timers, storage, uploadHeaders, deletions, retries, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
+  return { get, inputs, requests, previews, contextRequests, exports, downloads, participants: () => get('participant-list').children.map(card => ({ name: card.children[2], description: card.children[4], remove: card.children[0].children[1] })), timers, storage, uploadHeaders, deletions, retries, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
 }
 
 test('shared theme defaults to dark, toggles, and restores a saved preference', async () => {
@@ -669,4 +673,65 @@ test('switching users clears private transcripts and selections, including reuse
   assert.equal(get('batch-review').hidden, true);
   assert.equal(storage.get('voice-selected-job:42'), 'private-first');
   assert.equal(storage.has('voice-selected-job:43'), false);
+});
+
+
+test('Word and PDF download current edits with the original recording filename', async () => {
+  const app = await workspace({jobs:[{id:'done',filename:'جلسه.wav',status:'completed',transcript:'Saved original'}],saved:'done'});
+  app.get('transcript-text').value = 'Edited Persian فارسی';
+  await app.get('download-docx').listeners.click();
+  await app.get('download-pdf').listeners.click();
+  assert.deepEqual(app.exports.map(item => item.body), [{format:'docx',text:'Edited Persian فارسی'},{format:'pdf',text:'Edited Persian فارسی'}]);
+  assert.deepEqual(app.downloads, ['جلسه-transcript.docx','جلسه-transcript.pdf']);
+  assert.equal(app.jobs()[0].transcript, 'Saved original');
+  assert.equal(app.get('download-pdf').disabled, false);
+});
+
+test('duplicate document requests are blocked and generation state is visible', async () => {
+  let finish;
+  const app = await workspace({jobs:[{id:'done',filename:'meeting.wav',status:'completed'}],saved:'done',onExport:() => new Promise(resolve => { finish = resolve; })});
+  const first = app.get('download-pdf').listeners.click();
+  assert.equal(app.get('download-pdf').textContent, 'Generating…');
+  assert.equal(app.get('download-docx').disabled, true);
+  await app.get('download-docx').listeners.click();
+  assert.equal(app.exports.length, 1);
+  finish({ok:true,blob:async () => new Blob(['pdf'])});
+  await first;
+  assert.equal(app.downloads.length, 1);
+  assert.equal(app.get('download-docx').disabled, false);
+});
+
+test('export errors and empty text leave downloads available for retry', async () => {
+  const app = await workspace({jobs:[{id:'done',filename:'meeting.wav',status:'completed'}],saved:'done',onExport:async () => ({ok:false,status:429,json:async () => ({detail:'Export busy'})})});
+  await app.get('download-pdf').listeners.click();
+  assert.equal(app.get('toast').textContent, 'Export busy');
+  assert.equal(app.get('download-pdf').disabled, false);
+  assert.equal(app.downloads.length, 0);
+  app.get('transcript-text').value = ' ';
+  await app.get('download-docx').listeners.click();
+  assert.equal(app.exports.length, 1);
+  assert.equal(app.get('toast').textContent, 'The transcript is empty.');
+});
+
+test('logout or selecting another job prevents a late private document download', async () => {
+  for (const logout of [true,false]) {
+    let finish;
+    let signal;
+    const app = await workspace({jobs:[{id:'done',filename:'meeting.wav',status:'completed'},{id:'other',filename:'other.wav',status:'completed'}],saved:'done',onExport:(job,options) => {signal=options.signal;return new Promise(resolve => {finish=resolve;});}});
+    const pending = app.get('download-pdf').listeners.click();
+    if (logout) await app.get('logout').listeners.click();
+    else { app.get('jobs-list').children[1].listeners.click(); await new Promise(resolve => setImmediate(resolve)); }
+    assert.equal(signal.aborted, true);
+    finish({ok:true,blob:async () => new Blob(['private'])});
+    await pending;
+    assert.equal(app.downloads.length, 0);
+  }
+});
+
+test('expired export session returns to login without downloading', async () => {
+  const app = await workspace({jobs:[{id:'done',filename:'meeting.wav',status:'completed'}],saved:'done',onExport:async () => ({ok:false,status:401})});
+  await app.get('download-pdf').listeners.click();
+  assert.equal(app.get('workspace-view').hidden, true);
+  assert.equal(app.downloads.length, 0);
+  assert.equal(app.get('transcript-text').value, '');
 });

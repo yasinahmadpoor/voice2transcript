@@ -58,3 +58,20 @@ Resume validates the source recording, actual chunk boundaries/content, and prov
 - [Provider selection and credentials](../guides/model-providers.md)
 - [Transcribing recordings](../guides/transcriptions.md)
 - [Accounts and administration](../guides/accounts.md)
+
+### Styled transcript exports
+
+`POST /jobs/{job_id}/export` requires the owner's session and a completed job.
+Send JSON `{"format":"docx","text":"Edited transcript"}` or use `"pdf"`.
+Omit `text` to export the saved transcript. Supplying text does not modify history.
+The response is a binary attachment with a Unicode-safe recording filename and
+`application/pdf` or
+`application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+Both trailing-slash forms work. Responses use `Cache-Control: no-store`.
+
+Empty text, invalid controls, unknown fields or formats, and more than 100,000
+characters return 422; unfinished jobs return 409; another owner's job returns
+404. One generation at a time per web process is allowed (429 with `Retry-After:
+5` when busy). A bounded child worker returns 504 on a 45-second timeout or 503 on
+generation failure. Generation does not use transcription queue slots, contact an
+AI provider, persist an export, or change the saved transcript.

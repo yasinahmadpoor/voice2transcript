@@ -24,6 +24,7 @@ let historySignature = '';
 let refreshTask = null;
 let pendingDeletion = null;
 let deletionInFlight = null;
+let exportRequest = null;
 const cancelRequests = new Set();
 const settingInputs = document.querySelectorAll('[data-transcription-setting]');
 const languageSelect = new LanguageSelect();
@@ -358,6 +359,7 @@ function renderHistory(jobs) {
 async function viewJob(job) {
   const changed = selectedJob?.id !== job?.id;
   if (changed) {
+    resetExport();
     meetingContext.clearSaved();
     ++selectionGeneration;
     loadedResultId = null;
@@ -682,6 +684,7 @@ $('transcribe-form').addEventListener('submit', async (event) => {
 });
 
 function resetWorkspace() {
+  resetExport();
   meetingContext.clear();
   $('meeting-description').value = '';
   $('prompt').value = '';
@@ -766,4 +769,53 @@ $('download').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('transcript-text').addEventListener('input', updateWordCount);
+
+function resetExport() {
+  exportRequest?.abort();
+  exportRequest = null;
+  for (const format of ['docx', 'pdf']) {
+    $(`download-${format}`).disabled = false;
+    $(`download-${format}`).textContent = format === 'docx' ? 'Download Word ↓' : 'Download PDF ↓';
+  }
+}
+
+async function downloadDocument(format) {
+  if (exportRequest || !signedIn || !selectedJob || loadedResultId !== selectedJob.id || selectedJob.status !== 'completed') return;
+  const text = $('transcript-text').value;
+  if (!text.trim()) { toast('The transcript is empty.'); return; }
+  const jobId = selectedJob.id;
+  const generation = selectionGeneration;
+  const accountGeneration = pollGeneration;
+  const filename = transcriptFilename.replace(/\.txt$/, `.${format}`);
+  const controller = new AbortController();
+  exportRequest = controller;
+  for (const extension of ['docx', 'pdf']) $(`download-${extension}`).disabled = true;
+  $(`download-${format}`).textContent = 'Generating…';
+  const current = () => exportRequest === controller && signedIn && selectedJobId === jobId && generation === selectionGeneration && accountGeneration === pollGeneration;
+  try {
+    const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/export`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({format, text}), signal: controller.signal,
+    });
+    if (!current()) return;
+    if (response.status === 401) { resetWorkspace(); showLogin('Your session has expired. Sign in again.'); return; }
+    if (!response.ok) throw new Error(await errorMessage(response));
+    const blob = await response.blob();
+    if (!current()) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`${format === 'docx' ? 'Word' : 'PDF'} download ready`);
+  } catch (error) {
+    if (current() && error.name !== 'AbortError') toast(error.message || 'Could not download the document. Try again.');
+  } finally {
+    if (exportRequest === controller) resetExport();
+  }
+}
+
+$('download-docx').addEventListener('click', () => downloadDocument('docx'));
+$('download-pdf').addEventListener('click', () => downloadDocument('pdf'));
 openWorkspace().catch(() => showLogin('Cannot reach the server. Please reload the page to try again.'));

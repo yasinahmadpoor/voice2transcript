@@ -55,7 +55,9 @@ def run_isolated(parameters, *, timeout_seconds=None):
     from django.conf import settings
 
     check_cancelled()
-    deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+    deadline = (
+        time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+    )
     # The parent owns this directory, including the child's converted chunks.
     # It can clean everything even when cancellation kills the child abruptly.
     with tempfile.TemporaryDirectory(prefix="transcription_worker_") as directory:
@@ -64,27 +66,35 @@ def run_isolated(parameters, *, timeout_seconds=None):
             "JOB_DATA_DIR": str(settings.DATA_DIR),
             "TMPDIR": directory,
         }
-        with tempfile.TemporaryFile(dir=directory) as output:
+        # A regular, anonymous file gives the child the entire input and EOF
+        # immediately. Retrying communicate(input=None) after a short timeout
+        # can stop writing a partly filled stdin pipe on some Python versions,
+        # leaving larger prompts/transcripts and json.load() waiting forever.
+        with (
+            tempfile.TemporaryFile(dir=directory) as source,
+            tempfile.TemporaryFile(dir=directory) as output,
+        ):
+            source.write(json.dumps(parameters, ensure_ascii=False).encode("utf-8"))
+            source.seek(0)
             process = subprocess.Popen(
                 [sys.executable, "-m", "apps.transcriptions.services.worker"],
                 cwd=settings.BASE_DIR,
                 env=environment,
-                stdin=subprocess.PIPE,
+                stdin=source,
                 stdout=output,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
             try:
-                payload = json.dumps(parameters).encode()
                 while True:
                     check_cancelled()
                     if deadline is not None and time.monotonic() >= deadline:
                         raise TimeoutError("Transcription worker timed out.")
                     try:
-                        process.communicate(input=payload, timeout=0.1)
+                        process.wait(timeout=0.1)
                         break
                     except subprocess.TimeoutExpired:
-                        payload = None
+                        continue
                 check_cancelled()
                 if process.returncode == 2:
                     from .checkpoints import CheckpointMismatch
@@ -105,4 +115,3 @@ def run_isolated(parameters, *, timeout_seconds=None):
                 return result
             finally:
                 _terminate(process)
-                process.stdin.close()

@@ -59,3 +59,24 @@ Successful recordings are deleted locally after the transcript is committed. Fai
 
 - [Accounts and administration](accounts.md)
 - [API reference](../reference/api.md)
+
+## Word and PDF downloads
+
+Completed transcripts offer **Copy text**, **Download .txt**, **Download Word**,
+and **Download PDF**. Every download uses the text currently displayed in the
+editor, including your edits. Edits are not saved back to job history.
+
+Word (`.docx`) and PDF use the same clean document theme: white A4 pages,
+a recording title and transcription date (UTC), readable spacing, purple speaker
+labels, and page numbers. Original text, line breaks, and timestamps are preserved;
+content is never summarized or sent to an AI model during export. Paragraph
+direction follows the text so Persian and English can appear together. Licensed
+Vazirmatn regular and bold fonts are bundled and embedded in both formats.
+Word pagination can vary slightly between document viewers.
+
+Styled exports support up to 100,000 characters. TXT has no additional export
+limit. One document is generated at a time per web process, independently of the
+transcription queue, with a 45-second timeout. If generation is busy or fails,
+retry or download TXT. Exports are generated on demand in temporary worker storage
+and are not retained by the service. Meeting descriptions, participant biographies,
+provider settings, and prompts are not added to the document.

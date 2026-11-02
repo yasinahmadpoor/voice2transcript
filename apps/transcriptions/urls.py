@@ -11,6 +11,7 @@ urlpatterns = [
     path("jobs", views.jobs),
     path("jobs/<str:job_id>", views.job_detail),
     path("jobs/<str:job_id>/result", views.job_result),
+    path("jobs/<str:job_id>/export", views.job_export),
     path("jobs/<str:job_id>/context", views.job_context),
     path("jobs/<str:job_id>/retry", views.retry_job),
     path("jobs/<str:job_id>/cancel", views.cancel_job),
