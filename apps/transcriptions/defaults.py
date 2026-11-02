@@ -1,7 +1,5 @@
 """Shared defaults for validation, API metadata, and transcription jobs."""
 
-from apps.transcriptions.services.pipeline import DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL
-
 API_DEFAULT_PROMPT = """You are an expert transcription and diarization engine.
 
 Tasks:
@@ -28,11 +26,9 @@ def transcription_defaults(selected=None):
 
     provider = resolve_provider(selected)
     return {
-        "provider": str(provider.pk) if provider else "env",
-        "model": provider.model if provider else DEFAULT_MODEL,
-        "fallback_model": provider.fallback_model
-        if provider
-        else DEFAULT_FALLBACK_MODEL,
+        "provider": str(provider.pk),
+        "model": provider.model,
+        "fallback_model": provider.fallback_model,
         "chunk_minutes": API_DEFAULT_CHUNK_MINUTES,
         "language_hint": API_DEFAULT_LANGUAGE_HINT,
         "prompt": API_DEFAULT_PROMPT,

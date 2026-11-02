@@ -11,7 +11,7 @@ const source = readFileSync(resolve(root, 'apps/transcriptions/static/transcript
 const languageSource = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/language-select.js'), 'utf8');
 const themeSource = readFileSync(resolve(root, 'static/js/theme.js'), 'utf8');
 const defaults = {
-  provider: 'env',
+  provider: '3',
   model: 'server-primary', fallback_model: 'server-fallback',
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
@@ -80,7 +80,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
       if (url === '/auth/me') return { ok: true, json: async () => ({ ...currentAccount, max_upload_mb: 500 }) };
       if (url === '/auth/login') return {ok:true};
       if (url === '/transcription/defaults') return { ok: true, json: async () => defaults };
-      if (url === '/transcription/providers') return {ok:true,json:async () => ({providers:[{id:'env',name:'Gemini (.env)',model:defaults.model,fallback_model:defaults.fallback_model},{id:'7',name:'Custom audio',model:'custom-audio',fallback_model:''}]})};
+      if (url === '/transcription/providers') return {ok:true,json:async () => ({providers:[{id:'3',name:'Gemini',model:defaults.model,fallback_model:defaults.fallback_model},{id:'7',name:'Custom audio',model:'custom-audio',fallback_model:''}]})};
       if (url === '/auth/logout') return { ok: true };
       if (url === '/jobs' && !options) {
         return { ok: true, json: async () => structuredClone({ jobs: serverJobs, max_active: 2, active: serverJobs.filter(job => job.status === 'processing').length, queued: serverJobs.filter(job => job.status === 'queued').length }) };
@@ -207,7 +207,7 @@ test('selecting a configured provider updates model defaults and submits its ide
   await get('transcribe-form').listeners.submit({preventDefault(){}});
   assert.equal(requests[0].get('provider'), '7');
   get('reset-settings').listeners.click();
-  assert.equal(get('provider').value, 'env');
+  assert.equal(get('provider').value, '3');
   assert.equal(get('model').value, defaults.model);
 });
 

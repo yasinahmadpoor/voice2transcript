@@ -23,6 +23,8 @@ from django.utils import timezone
 from apps.accounts import services as auth
 from apps.transcriptions.services import jobs as api
 from apps.transcriptions.services import runtime
+from apps.transcriptions.models import ModelProvider
+from apps.transcriptions.services.seeding import GEMINI_SEED_KEY
 
 
 class WebTests(TransactionTestCase):
@@ -63,6 +65,16 @@ class WebTests(TransactionTestCase):
         self.user = get_user_model().objects.create(
             username="tester", password=self.django_password_hash
         )
+        self.provider = ModelProvider.objects.create(
+            seed_key=GEMINI_SEED_KEY,
+            name="Gemini",
+            kind="gemini",
+            model="test-primary",
+            fallback_model="test-fallback",
+            is_default=True,
+        )
+        self.provider.set_api_key("fake-web-provider-key")
+        self.provider.save()
         self.owner = auth.owner_key(self.user)
         self.queue = runtime.get_queue()
         self.client = Client()
@@ -431,7 +443,9 @@ class WebTests(TransactionTestCase):
         self.login()
         seen_paths = []
 
-        def fake_pipeline(path, model, chunk_minutes, language, fallback, prompt):
+        def fake_pipeline(
+            path, model, chunk_minutes, language, fallback, prompt, **kwargs
+        ):
             self.assertEqual(path.read_bytes(), b"audio-content")
             self.assertEqual(language, "fa")
             seen_paths.append(path)
@@ -564,7 +578,7 @@ class WebTests(TransactionTestCase):
         self.login()
         started = threading.Event()
 
-        def runner(*args):
+        def runner(*args, **kwargs):
             started.set()
             while True:
                 check_cancelled()
@@ -611,7 +625,7 @@ class WebTests(TransactionTestCase):
         self.login()
         started = threading.Event()
 
-        def runner(*args):
+        def runner(*args, **kwargs):
             started.set()
             while True:
                 check_cancelled()
@@ -660,7 +674,7 @@ class WebTests(TransactionTestCase):
                 raise RuntimeError("Synthetic failure")
             return f"Saved chunk {index}"
 
-        def runner(path, *args):
+        def runner(path, *args, **kwargs):
             return transcribe_chunks(
                 chunks,
                 transcribe,
@@ -799,7 +813,7 @@ class WebTests(TransactionTestCase):
         active = 0
         peak = 0
 
-        def runner(*args):
+        def runner(*args, **kwargs):
             nonlocal active, peak
             with lock:
                 active += 1

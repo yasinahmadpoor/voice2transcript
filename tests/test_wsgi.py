@@ -29,7 +29,7 @@ class WSGITests(unittest.TestCase):
                 "import os, time\n"
                 "from pathlib import Path\n"
                 "from apps.transcriptions.services import jobs as services\n"
-                "def runner(*args):\n"
+                "def runner(*args, **kwargs):\n"
                 "    while not Path(os.environ['TEST_RELEASE']).exists():\n"
                 "        time.sleep(0.02)\n"
                 "    return 'SPEAKER_1: Synthetic transcript'\n"
@@ -42,6 +42,7 @@ class WSGITests(unittest.TestCase):
             base = f"http://127.0.0.1:{port}"
             env = os.environ | {
                 "DJANGO_SETTINGS_MODULE": "config.settings.production",
+                "GEMINI_API_KEY": "fake-wsgi-test-key",
                 "APP_USERNAME": "integration",
                 "APP_PASSWORD_HASH": auth.hash_password("integration-test-password"),
                 "JOB_DATA_DIR": str(folder / "data"),
@@ -53,6 +54,13 @@ class WSGITests(unittest.TestCase):
             }
             subprocess.run(
                 [sys.executable, "manage.py", "migrate", "--noinput"],
+                cwd=root,
+                env=env,
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                [sys.executable, "manage.py", "seed_providers"],
                 cwd=root,
                 env=env,
                 check=True,

@@ -15,7 +15,7 @@ class ModelProviderAdminForm(forms.ModelForm):
     api_key = forms.CharField(
         required=False,
         widget=forms.PasswordInput(render_value=False),
-        help_text="Leave blank to keep the saved key. Direct Google Gemini can use the environment key; a custom Gemini URL requires its own key. Local OpenAI-compatible services may need no key.",
+        help_text="Leave blank to keep the saved key. Gemini requires a saved API key. Local OpenAI-compatible services may need no key.",
     )
     clear_api_key = forms.BooleanField(
         required=False, help_text="Remove the saved key."

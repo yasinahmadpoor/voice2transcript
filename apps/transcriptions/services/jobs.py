@@ -8,7 +8,6 @@ from google import genai
 from google.genai import types
 
 from apps.transcriptions.services.queue import JobNotFound
-from common.environment import get_api_key_from_env
 from common.http import APIError
 
 from .pipeline import run_transcription_pipeline_raw
@@ -63,8 +62,8 @@ def execute_pipeline(
                 input_path,
                 {
                     "provider": provider,
-                    "kind": selected.kind if selected else "gemini",
-                    "base_url": selected.base_url.rstrip("/") if selected else "",
+                    "kind": selected.kind,
+                    "base_url": selected.base_url.rstrip("/"),
                     "model": model,
                     "fallback_model": fallback_model,
                     "chunk_minutes": chunk_minutes,
@@ -76,7 +75,7 @@ def execute_pipeline(
             else None
         )
         options = {"checkpoint": checkpoint} if checkpoint is not None else {}
-        if selected and selected.kind == "openai":
+        if selected.kind == "openai":
             return transcribe_openai(
                 selected,
                 input_path,
@@ -87,7 +86,7 @@ def execute_pipeline(
                 prompt,
                 **options,
             )
-        if selected and selected.base_url:
+        if selected.base_url:
             api_key = selected.get_api_key()
             if not api_key:
                 raise ProviderError(
@@ -112,7 +111,9 @@ def execute_pipeline(
                 )
             finally:
                 client.close()
-        api_key = (selected.get_api_key() if selected else "") or get_api_key_from_env()
+        api_key = selected.get_api_key()
+        if not api_key:
+            raise ProviderError("Add this Gemini provider's API key in admin.")
         client = genai.Client(api_key=api_key)
         try:
             return run_transcription_pipeline_raw(

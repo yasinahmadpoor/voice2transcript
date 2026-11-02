@@ -12,8 +12,6 @@ from common.http import APIError
 from .checkpoints import transcribe_chunks
 
 from .pipeline import (
-    DEFAULT_FALLBACK_MODEL,
-    DEFAULT_MODEL,
     PROMPT_BASE,
     convert_to_wav,
     split_wav,
@@ -26,12 +24,26 @@ def resolve_provider(value=None):
     from ..models import ModelProvider
 
     if value is None:
-        return ModelProvider.objects.filter(is_default=True, is_enabled=True).first()
+        provider = ModelProvider.objects.filter(
+            is_default=True, is_enabled=True
+        ).first()
+        if provider is None:
+            raise APIError(
+                503,
+                "No default transcription provider is configured. Run seed_providers or choose an enabled default in admin.",
+            )
+        return provider
     if value == "env":
-        return None
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,18}", value):
-        raise APIError(422, "Choose an enabled transcription provider.")
-    provider = ModelProvider.objects.filter(pk=int(value), is_enabled=True).first()
+        # Old jobs keep their original settings and checkpoint fingerprint.
+        from .seeding import GEMINI_SEED_KEY
+
+        provider = ModelProvider.objects.filter(
+            seed_key=GEMINI_SEED_KEY, is_enabled=True
+        ).first()
+    else:
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,18}", value):
+            raise APIError(422, "Choose an enabled transcription provider.")
+        provider = ModelProvider.objects.filter(pk=int(value), is_enabled=True).first()
     if provider is None:
         raise APIError(422, "This transcription provider is unavailable.")
     return provider
@@ -42,22 +54,13 @@ def available_providers():
 
     return [
         {
-            "id": "env",
-            "name": "Gemini (.env)",
-            "kind": "gemini",
-            "model": DEFAULT_MODEL,
-            "fallback_model": DEFAULT_FALLBACK_MODEL,
-        },
-        *[
-            {
-                "id": str(item.pk),
-                "name": item.name,
-                "kind": item.kind,
-                "model": item.model,
-                "fallback_model": item.fallback_model,
-            }
-            for item in ModelProvider.objects.filter(is_enabled=True)
-        ],
+            "id": str(item.pk),
+            "name": item.name,
+            "kind": item.kind,
+            "model": item.model,
+            "fallback_model": item.fallback_model,
+        }
+        for item in ModelProvider.objects.filter(is_enabled=True)
     ]
 
 

@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -102,7 +103,7 @@ class GeminiProxyTests(TestCase):
         self.provider.set_api_key("")
         self.provider.save()
         with (
-            patch.object(jobs, "get_api_key_from_env") as environment_key,
+            patch.dict(os.environ, {"GEMINI_API_KEY": "fake-env-key"}),
             patch.object(jobs.genai, "Client") as client,
         ):
             with self.assertRaisesRegex(providers.ProviderError, "API key"):
@@ -115,7 +116,6 @@ class GeminiProxyTests(TestCase):
                     "Prompt",
                     provider=str(self.provider.pk),
                 )
-            environment_key.assert_not_called()
             client.assert_not_called()
 
     def proxy_audio(self, response_text, chunks=1, minutes=20):

@@ -20,6 +20,7 @@ from .models import ModelProvider
 from .forms import ModelProviderAdminForm
 from .services.runtime import get_queue
 from .services.connection_test import check_connection
+from .services.seeding import GEMINI_SEED_KEY
 
 _connection_test_lock = Lock()
 
@@ -33,7 +34,7 @@ class ModelProviderAdmin(admin.ModelAdmin):
     form = ModelProviderAdminForm
     change_form_template = "admin/transcriptions/modelprovider/change_form.html"
     list_display = ["name", "kind", "model", "is_enabled", "is_default", "has_api_key"]
-    readonly_fields = ["is_default", "has_api_key"]
+    readonly_fields = ["is_default", "has_api_key", "seed_key"]
     fields = [
         "name",
         "kind",
@@ -45,8 +46,9 @@ class ModelProviderAdmin(admin.ModelAdmin):
         "fallback_model",
         "is_enabled",
         "is_default",
+        "seed_key",
     ]
-    actions = ["use_as_default", "use_environment_default"]
+    actions = ["use_as_default", "use_seeded_gemini_default"]
 
     def get_urls(self):
         return [
@@ -107,8 +109,7 @@ class ModelProviderAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         if (
-            not change
-            and obj.is_enabled
+            obj.is_enabled
             and not ModelProvider.objects.filter(is_default=True).exists()
         ):
             obj.make_default()
@@ -123,10 +124,22 @@ class ModelProviderAdmin(admin.ModelAdmin):
         queryset.first().make_default()
         self.message_user(request, "Default provider updated for new transcriptions.")
 
-    @admin.action(description="Restore environment Gemini as the default")
-    def use_environment_default(self, request, queryset):
-        ModelProvider.objects.filter(is_default=True).update(is_default=False)
-        self.message_user(request, "New transcriptions default to environment Gemini.")
+    @admin.action(description="Use seeded Gemini as the default")
+    def use_seeded_gemini_default(self, request, queryset):
+        provider = ModelProvider.objects.filter(
+            seed_key=GEMINI_SEED_KEY, is_enabled=True
+        ).first()
+        if provider is None:
+            self.message_user(
+                request,
+                "Seeded Gemini is unavailable. Run seed_providers and enable Gemini in admin.",
+                messages.ERROR,
+            )
+            return
+        provider.make_default()
+        self.message_user(
+            request, "New transcriptions default to the saved Gemini provider."
+        )
 
 
 @admin.register(TranscriptionJob)

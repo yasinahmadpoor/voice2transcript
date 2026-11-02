@@ -15,7 +15,7 @@
 | `POST /jobs/{id}/cancel` | Cancel a queued or processing job; HTTP 202. Processing jobs become `cancelling` until their local process stops, then `cancelled`. Repeated cancellation is safe. Completed or failed jobs return HTTP 409. |
 | `DELETE /jobs/{id}` | Remove a queued, completed, failed, or cancelled job and its recording/result; HTTP 409 while processing or cancelling. |
 
-`POST /jobs` accepts the same multipart fields as the legacy API: `file`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Blank language enables auto-detection, blank fallback disables fallback, and chunk length `0` disables splitting.
+`POST /jobs` accepts multipart fields `file`, `provider`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Provider IDs come from the database catalog; omitting `provider` selects the saved default. The legacy `env` value maps to the seeded Gemini record. There is no environment-key fallback. If no enabled default exists, defaults and submissions that omit a provider return HTTP 503 with setup instructions. Blank language enables auto-detection, blank fallback disables fallback, and chunk length `0` disables splitting.
 
 An optional `Idempotency-Key` header (1–128 letters, digits, underscores, or hyphens) identifies one recording upload. Reusing it for the same account returns the existing job, even if the queue is full, without transcribing it again. Keys persist with the job record; removing the job also removes its key. The frontend generates one key per selected file and reuses it for upload retries. The existing SQLite database is migrated automatically when the updated server starts.
 

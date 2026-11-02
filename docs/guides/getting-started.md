@@ -14,10 +14,11 @@ uv sync --locked
 
 `uv sync --locked` creates or updates `.venv` from `uv.lock`. You do not need to activate the environment when using `uv run`. Dependencies are declared in `pyproject.toml`; the former `requirements.txt` is replaced by the lockfile.
 
-Create `.env` from `.env.example` if you don't have one, and set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Keep your existing `.env` if it already contains a key. Configure your account:
+Create `.env` from `.env.example` if you don't have one, and set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Keep your existing `.env` if it already contains a key. The seed command imports it into encrypted database storage once; after that, manage keys and models in Django admin. If no initial key is available, Gemini is seeded disabled until you configure it in admin. Configure your account:
 
 ```sh
 uv run --locked python manage.py migrate
+uv run --locked python manage.py seed_providers
 uv run --locked python manage.py createsuperuser
 uv run --locked python manage.py collectstatic --noinput
 uv run --locked gunicorn config.wsgi:application --config gunicorn.conf.py --bind 127.0.0.1:8000

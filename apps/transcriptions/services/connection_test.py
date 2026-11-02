@@ -9,8 +9,6 @@ import httpx
 from google import genai
 from google.genai import errors, types
 
-from common.environment import get_api_key_from_env
-
 from .execution import run_isolated
 from .pipeline import run_transcription_pipeline_raw
 from .providers import ProviderError, transcribe_gemini_inline, transcribe_openai
@@ -57,20 +55,10 @@ def execute_connection_test(provider_id):
             text = transcribe_openai(provider, **options, request_timeout=15)
         else:
             key = provider.get_api_key()
-            if not key and provider.base_url:
+            if not key:
                 return {
                     "ok": False,
                     "message": "Add this Gemini provider's API key before testing.",
-                }
-            if not key:
-                try:
-                    key = get_api_key_from_env()
-                except RuntimeError:
-                    key = ""
-            if not key:
-                return {
-                    "ok": False,
-                    "message": "Add a Gemini API key in admin or the environment before testing.",
                 }
             http_options = types.HttpOptions(
                 timeout=15_000,

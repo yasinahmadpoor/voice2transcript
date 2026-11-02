@@ -70,7 +70,8 @@ class ProviderTests(TestCase):
             providers.resolve_provider(str(self.provider.pk))
         with self.assertRaises(ValidationError):
             self.provider.make_default()
-        self.assertEqual(transcription_defaults("env")["provider"], "env")
+        with self.assertRaises(APIError):
+            transcription_defaults("env")  # No seeded provider in this test DB.
 
     def test_invalid_provider_and_api_key_are_rejected(self):
         for value in ("missing", "999999", "https://untrusted.example.test", ""):
@@ -159,7 +160,7 @@ class ProviderTests(TestCase):
         response = client.get("/transcription/providers")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["providers"][1]["id"], str(self.provider.pk))
+        self.assertEqual(payload["providers"][0]["id"], str(self.provider.pk))
         for secret in (
             "fake-private-provider-key",
             self.provider.api_key_encrypted,

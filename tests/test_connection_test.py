@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 import re
 import wave
 from unittest.mock import MagicMock, patch
@@ -111,21 +112,19 @@ class ConnectionTestTests(TestCase):
 
         with (
             patch.object(probe.genai, "Client", side_effect=create_client),
-            patch.object(probe, "get_api_key_from_env") as environment,
+            patch.dict(os.environ, {"GEMINI_API_KEY": "fake-env-key"}),
         ):
             result = probe.execute_connection_test(self.provider.pk)
         self.assertTrue(result["ok"], result)
         self.assertEqual(len(calls), 1)
-        environment.assert_not_called()
 
-    def test_direct_gemini_keeps_files_adapter_and_environment_key(self):
+    def test_direct_gemini_keeps_files_adapter_and_uses_saved_key(self):
         self.provider.kind = "gemini"
         self.provider.base_url = ""
-        self.provider.set_api_key("")
         self.provider.save()
         client = MagicMock()
         with (
-            patch.object(probe, "get_api_key_from_env", return_value="fake-google-key"),
+            patch.dict(os.environ, {"GEMINI_API_KEY": "fake-env-key"}),
             patch.object(probe.genai, "Client", return_value=client) as create,
             patch.object(
                 probe, "run_transcription_pipeline_raw", return_value="Test"
@@ -133,7 +132,7 @@ class ConnectionTestTests(TestCase):
             patch.object(probe, "transcribe_gemini_inline") as proxy,
         ):
             self.assertTrue(probe.execute_connection_test(self.provider.pk)["ok"])
-        self.assertEqual(create.call_args.kwargs["api_key"], "fake-google-key")
+        self.assertEqual(create.call_args.kwargs["api_key"], "fake-private-test-key")
         self.assertEqual(adapter.call_args.kwargs["fallback_model"], "")
         self.assertEqual(adapter.call_args.kwargs["input_path"], probe.TEST_AUDIO)
         proxy.assert_not_called()
@@ -145,15 +144,13 @@ class ConnectionTestTests(TestCase):
         self.provider.save()
         with (
             patch.object(probe.genai, "Client") as client,
-            patch.object(probe, "get_api_key_from_env") as environment,
+            patch.dict(os.environ, {"GEMINI_API_KEY": "fake-env-key"}),
         ):
             result = probe.execute_connection_test(self.provider.pk)
             self.assertFalse(result["ok"])
             self.assertIn("API key", result["message"])
-            environment.assert_not_called()
             self.provider.base_url = ""
             self.provider.save()
-            environment.side_effect = RuntimeError("Missing key")
             result = probe.execute_connection_test(self.provider.pk)
             self.assertIn("API key", result["message"])
         client.assert_not_called()

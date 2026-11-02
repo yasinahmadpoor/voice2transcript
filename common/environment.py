@@ -44,12 +44,3 @@ def load_env_defaults() -> None:
             continue
         seen.add(resolved)
         load_env_file(candidate)
-
-
-def get_api_key_from_env() -> str:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "Set GEMINI_API_KEY (or GOOGLE_API_KEY) environment variable."
-        )
-    return api_key
