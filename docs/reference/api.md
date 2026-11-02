@@ -7,15 +7,39 @@
 | Endpoint | Behavior |
 | --- | --- |
 | `GET /transcription/providers` | List enabled providers and public model defaults; requires login. |
+| `POST /transcription/prompt-preview` | Validate JSON prompt/context and return `effective_prompt`; requires login, makes no model call, and creates no job. |
 | `POST /jobs` | Save a multipart recording and settings; return HTTP 202 with job metadata and a `Location` status URL. |
 | `GET /jobs?limit=50` | List recent jobs and global queue counts; limit 1–100. |
 | `GET /jobs/{id}` | Read job status, queue position, error, retry/resume availability, chunk progress, and Unix timestamps. |
 | `GET /jobs/{id}/result` | Download the UTF-8 text transcript; HTTP 409 until completed. |
+| `GET /jobs/{id}/context` | Read the owner's saved `meeting_description`, `participants`, original `prompt`, and `effective_prompt`; another account gets 404. |
 | `POST /jobs/{id}/retry` | Requeue a failed or cancelled job with its original file/settings and resume saved chunks; HTTP 202. Send JSON `{"restart":true}` to discard progress and restart. Empty requests remain supported. |
 | `POST /jobs/{id}/cancel` | Cancel a queued or processing job; HTTP 202. Processing jobs become `cancelling` until their local process stops, then `cancelled`. Repeated cancellation is safe. Completed or failed jobs return HTTP 409. |
 | `DELETE /jobs/{id}` | Remove a queued, completed, failed, or cancelled job and its recording/result; HTTP 409 while processing or cancelling. |
 
 `POST /jobs` accepts multipart fields `file`, `provider`, `language_hint`, `model`, `fallback_model`, `chunk_minutes`, and `prompt`. Provider IDs come from the database catalog; omitting `provider` selects the saved default. The legacy `env` value maps to the seeded Gemini record. There is no environment-key fallback. If no enabled default exists, defaults and submissions that omit a provider return HTTP 503 with setup instructions. Blank language enables auto-detection, blank fallback disables fallback, and chunk length `0` disables splitting.
+
+Optional multipart fields `meeting_description` (text, up to 5,000 characters)
+and `participants` (a JSON-encoded array) provide meeting context. For example:
+
+```json
+[{"name":"Sara","description":"Project lead"},{"name":"Ali","description":""}]
+```
+
+At most 20 participants are accepted, with names up to 100 characters and
+descriptions up to 1,000 characters. Blank rows are ignored; a description
+without a name is rejected. Invalid JSON, types, or lengths return HTTP 422.
+The `prompt` field remains the original instructions. The app saves a compiled
+`effective_prompt` with each job; clients cannot supply or override this field.
+It is reused for every chunk and every retry/resume/restart. Empty context
+preserves the original prompt exactly, including for legacy jobs.
+
+Preview JSON accepts `prompt`, `meeting_description`, and a native `participants`
+array, with all three optional. The preview uses the same validation/composer as
+submission. Its response is `{"effective_prompt":"..."}`. Provider-specific
+language handling still applies afterward. Saved context is fetched on demand,
+not included in polling lists or public metadata. Deleting the job deletes its
+context together with the settings.
 
 An optional `Idempotency-Key` header (1–128 letters, digits, underscores, or hyphens) identifies one recording upload. Reusing it for the same account returns the existing job, even if the queue is full, without transcribing it again. Keys persist with the job record; removing the job also removes its key. The frontend generates one key per selected file and reuses it for upload retries. The existing SQLite database is migrated automatically when the updated server starts.
 

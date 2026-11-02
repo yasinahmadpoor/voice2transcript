@@ -4,6 +4,7 @@
 {% block extra_head %}
   <link rel="stylesheet" href="{% static 'transcriptions/language-select.css' %}">
   <script src="{% static 'transcriptions/language-select.js' %}" defer></script>
+  <script src="{% static 'transcriptions/meeting-context.js' %}" defer></script>
   <script src="{% static 'transcriptions/app.js' %}" defer></script>
 {% endblock %}
 
@@ -63,6 +64,27 @@
               <span id="language-matches" class="sr-only" role="status" aria-live="polite"></span>
             </div>
             <p id="language-help" class="field-help">Search 184 languages by name or code, or enter your own. Leave blank for auto-detect. Language support depends on the selected model.</p>
+            <div class="meeting-fields">
+              <div class="field-heading"><label for="meeting-description">About the meeting</label><span>Optional context</span></div>
+              <textarea id="meeting-description" name="meeting_description" class="context-input" rows="3" maxlength="5000" dir="auto" data-transcription-setting aria-describedby="meeting-help" placeholder="Topic, agenda, terminology, or useful background…"></textarea>
+              <p id="meeting-help" class="field-help">Help the model understand the conversation. These details apply to every recording in this batch.</p>
+              <div class="field-heading"><span class="context-label" id="participants-label">Participants</span><span>Optional · up to 20</span></div>
+              <input id="participants-data" name="participants" type="hidden" value="[]" data-transcription-setting>
+              <div id="participant-list" class="participant-list" role="group" aria-labelledby="participants-label"></div>
+              <button id="add-participant" class="secondary-button" type="button">Add participant</button>
+              <p class="field-help">Add a name and an optional description, such as role or pronunciation. Names are used only when supported by the recording; other speakers keep generic labels.</p>
+            </div>
+            <details id="advanced-prompt" class="advanced-prompt">
+              <summary>Advanced prompt</summary>
+              <div class="settings-fields">
+                <label for="prompt">Transcription instructions</label>
+                <textarea id="prompt" name="prompt" class="prompt-input" rows="8" required aria-describedby="prompt-help" data-transcription-setting></textarea>
+                <p id="prompt-help" class="field-help">The default instructions work with the fields above. Edit these to control format or behavior; meeting and participant details are added as context.</p>
+                <button id="preview-prompt" class="secondary-button" type="button">Preview final prompt</button>
+                <p id="prompt-preview-error" class="error" role="alert" hidden></p>
+                <div id="prompt-preview" hidden><h3 class="context-label">Final prompt</h3><p class="field-help">This is the combined prompt the app will send. Providers may also receive the recording language hint.</p><pre id="prompt-preview-text" class="prompt-preview" dir="auto"></pre></div>
+              </div>
+            </details>
             <details class="transcription-settings">
               <summary>Transcription settings</summary>
               <div class="settings-fields">
@@ -76,10 +98,8 @@
                 <label for="chunk-minutes">Chunk length (minutes)</label>
                 <input id="chunk-minutes" name="chunk_minutes" type="number" min="0" max="120" step="any" required aria-describedby="chunk-help" data-transcription-setting>
                 <p id="chunk-help" class="field-help">Split long recordings into chunks. Set 0 to disable splitting.</p>
-                <label for="prompt">Transcription prompt</label>
-                <textarea id="prompt" name="prompt" class="prompt-input" rows="8" required aria-describedby="prompt-help" data-transcription-setting></textarea>
-                <p id="prompt-help" class="field-help">Instructions sent with the recording. Edit to change the output format or speaker labels.</p>
                 <button id="reset-settings" class="secondary-button" type="button">Reset to API defaults</button>
+                <p class="field-help">Reset also clears meeting and participant details and restores the default prompt.</p>
               </div>
             </details>
             <p id="upload-error" class="error" role="alert" hidden></p>
@@ -104,13 +124,27 @@
         <p id="jobs-error" class="error" role="status" hidden></p>
         <p id="jobs-empty" class="jobs-empty">Your queued and completed recordings will appear here.</p>
         <div id="jobs-list" class="jobs-list"></div>
-        <div id="job-actions" class="job-actions" hidden><span id="selected-job-note"></span><button id="cancel-selected-job" class="secondary-button" type="button" hidden>Cancel transcription</button><button id="restart-job" class="secondary-button" type="button" hidden>Restart from beginning</button><button id="delete-job" class="quiet-button" type="button">Remove recording</button></div>
+        <div id="job-actions" class="job-actions" hidden><span id="selected-job-note"></span><button id="view-job-context" class="secondary-button" type="button">View saved meeting details</button><button id="cancel-selected-job" class="secondary-button" type="button" hidden>Cancel transcription</button><button id="restart-job" class="secondary-button" type="button" hidden>Restart from beginning</button><button id="delete-job" class="quiet-button" type="button">Remove recording</button></div>
       </section>
       <p class="workspace-tip"><span aria-hidden="true">✦</span> For clearer results, use recordings with less background noise.</p>
     </section>
 {% endblock %}
 
 {% block extra_body %}
+  <dialog id="job-context-dialog" class="confirmation-dialog context-dialog" aria-labelledby="job-context-title">
+    <h2 id="job-context-title">Saved meeting details</h2>
+    <p id="context-job-name" class="dialog-filename" dir="auto"></p>
+    <p class="field-help">These are the instructions saved at submission. Retry, resume, and restart reuse this snapshot.</p>
+    <p id="context-loading" role="status" hidden>Loading saved details…</p>
+    <p id="context-error" class="error" role="alert" hidden></p>
+    <div id="context-saved-content" hidden>
+      <h3 class="context-label">About the meeting</h3><p id="context-meeting" class="saved-context-text" dir="auto"></p>
+      <h3 class="context-label">Participants</h3><ul id="context-participants" class="saved-participants"></ul>
+      <details><summary>Original prompt</summary><pre id="context-original-prompt" class="prompt-preview" dir="auto"></pre></details>
+      <details><summary>Final prompt</summary><pre id="context-final-prompt" class="prompt-preview" dir="auto"></pre></details>
+    </div>
+    <div class="dialog-actions"><button id="close-job-context" class="secondary-button" type="button" autofocus>Close</button></div>
+  </dialog>
   <dialog id="delete-dialog" class="confirmation-dialog" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-description delete-dialog-filename">
     <h2 id="delete-dialog-title">Delete transcription?</h2>
     <p id="delete-dialog-filename" class="dialog-filename"><bdi id="delete-job-name"></bdi></p>

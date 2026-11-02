@@ -256,7 +256,7 @@ class JobQueue:
                     settings["chunk_minutes"],
                     settings["language_hint"],
                     settings["fallback_model"],
-                    settings["prompt"],
+                    settings.get("effective_prompt", settings["prompt"]),
                     **options,
                 )
                 check_cancelled()
@@ -386,6 +386,23 @@ class JobQueue:
         if row["status"] != "completed":
             raise JobConflict("The transcript is not ready yet.")
         return row["transcript"]
+
+    def context(self, job_id: str, owner: str) -> dict:
+        with self._db() as db:
+            row = db.execute(
+                "SELECT settings FROM jobs WHERE id=? AND owner=?", (job_id, owner)
+            ).fetchone()
+        if row is None:
+            raise JobNotFound("Job not found.")
+        settings = json.loads(row["settings"])
+        return {
+            "meeting_description": settings.get("meeting_description", ""),
+            "participants": settings.get("participants", []),
+            "prompt": settings.get("prompt", ""),
+            "effective_prompt": settings.get(
+                "effective_prompt", settings.get("prompt", "")
+            ),
+        }
 
     def retry(self, job_id: str, owner: str, restart: bool = False) -> dict:
         with self._db() as db:

@@ -9,6 +9,12 @@ from common.http import APIError
 
 from .defaults import transcription_defaults
 from .models import ModelProvider
+from .services.prompts import (
+    MAX_MEETING_DESCRIPTION,
+    MAX_PARTICIPANTS,
+    MAX_PARTICIPANT_DESCRIPTION,
+    MAX_PARTICIPANT_NAME,
+)
 
 
 class ModelProviderAdminForm(forms.ModelForm):
@@ -70,14 +76,61 @@ class ModelProviderAdminForm(forms.ModelForm):
         return instance
 
 
-class TranscriptionForm(forms.Form):
+class ParticipantListField(forms.JSONField):
+    # An empty array is valid optional context, rather than a missing value.
+    empty_values = (None, "")
+
+
+class PromptContextForm(forms.Form):
+    prompt = forms.CharField(strip=False)
+    meeting_description = forms.CharField(
+        required=False, max_length=MAX_MEETING_DESCRIPTION
+    )
+    participants = ParticipantListField(required=False)
+
+    def clean_participants(self):
+        participants = self.cleaned_data["participants"]
+        if not isinstance(participants, list):
+            raise forms.ValidationError(
+                "Participants must be a JSON array of names and descriptions."
+            )
+        if len(participants) > MAX_PARTICIPANTS:
+            raise forms.ValidationError(f"Add at most {MAX_PARTICIPANTS} participants.")
+        cleaned = []
+        for index, participant in enumerate(participants, start=1):
+            if (
+                not isinstance(participant, dict)
+                or set(participant) - {"name", "description"}
+                or not isinstance(participant.get("name", ""), str)
+                or not isinstance(participant.get("description", ""), str)
+            ):
+                raise forms.ValidationError(
+                    f"Participant {index} must have a text name and description."
+                )
+            name = participant.get("name", "").strip()
+            description = participant.get("description", "").strip()
+            if not name and not description:
+                continue
+            if not name:
+                raise forms.ValidationError(f"Enter a name for participant {index}.")
+            if (
+                len(name) > MAX_PARTICIPANT_NAME
+                or len(description) > MAX_PARTICIPANT_DESCRIPTION
+            ):
+                raise forms.ValidationError(
+                    f"Participant {index}: names allow 100 characters and descriptions allow 1,000 characters."
+                )
+            cleaned.append({"name": name, "description": description})
+        return cleaned
+
+
+class TranscriptionForm(PromptContextForm):
     file = forms.FileField(allow_empty_file=True)
     provider = forms.CharField()
     model = forms.CharField(strip=False)
     chunk_minutes = forms.FloatField(min_value=0, max_value=120)
     language_hint = forms.CharField(max_length=100, required=False, strip=False)
     fallback_model = forms.CharField(required=False, strip=False)
-    prompt = forms.CharField(strip=False)
 
     def __init__(self, data, files):
         selected = data.get("provider") if "provider" in data else None

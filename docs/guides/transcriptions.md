@@ -10,6 +10,35 @@ Select or drop multiple audio/video files to create a batch. Review sizes, previ
 
 Each file shows its upload status. Invalid files are skipped, and failed files can be retried without resubmitting successful ones. If the queue fills or the connection drops, remaining uploads stop and can be retried later. Retry keys prevent duplicate jobs when a server response is lost. Clearing the upload list does not cancel jobs already submitted. Keep the page open until uploads finish; file selections and unsubmitted uploads are not preserved after refreshing or closing it.
 
+## Meeting details and advanced instructions
+
+The optional **About the meeting** field accepts the topic, agenda, terminology,
+and background (up to 5,000 characters). Under **Participants**, add up to 20
+people, each with a name (100 characters) and an optional description (1,000
+characters), such as their role or name pronunciation. Empty rows are ignored;
+a description requires a name. Add or remove rows without editing a prompt.
+These hints apply to every recording in the batch.
+
+Leave **Advanced prompt** closed to use the default transcription instructions.
+Open it to change formatting or behavior. The app combines these instructions
+with meeting and participant context on the server. **Preview final prompt**
+shows that combined text without sending audio to a model or creating a job.
+Changing any prompt/context field invalidates the old preview. The selected
+recording language is still passed separately or appended by the provider's
+existing adapter. Context supplies hints rather than replacing the recording:
+the instructions ask for names only when supported by the audio and generic
+`SPEAKER_1`, `SPEAKER_2` labels otherwise. They do not verify speaker identity.
+Provider support for following prompts and speaker labeling varies.
+
+Each job saves the original fields, original prompt, and combined prompt once.
+Select a recording in history and click **View saved meeting details** to read
+that snapshot. Viewing it does not replace the current form. Retry, resume,
+and restart use the saved instructions even after the form or application
+defaults change. Older recordings retain their original prompt and show no
+meeting or participant details. **Reset to API defaults** clears context and
+restores the default prompt. Signing out clears unsent context and previews;
+unsubmitted context is not saved in browser storage.
+
 ## Background jobs and recovery
 
 Uploads return a job ID immediately after the file is saved. Jobs run in queue order and expose **Queued → Processing → Completed / Failed** states. The frontend polls status every two seconds and shows queue position and active worker counts. You can submit another recording while existing jobs run, close the page, or sign out. Reopening the workspace restores the selected job and shows your most recent 50 recordings. Users can list, open, download, retry, or remove only their own jobs; another account's job ID returns HTTP 404. Upload retry keys are scoped to the user. Queue capacity and the two active transcription workers are shared across accounts; the displayed activity counts describe that shared queue. Transcripts remain stored until their job is removed; edits made in the transcript editor are only kept in the current page, so download edited text before leaving.

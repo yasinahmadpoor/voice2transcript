@@ -12,6 +12,7 @@ SPEAKER_1: text
 SPEAKER_2: text
 
 Rules:
+- When meeting context is supplied, a speaker label may use a participant's name only if the recording supports the match; otherwise keep SPEAKER_1, SPEAKER_2, etc.
 - No timestamps.
 - No JSON.
 - No markdown fences.
@@ -32,4 +33,6 @@ def transcription_defaults(selected=None):
         "chunk_minutes": API_DEFAULT_CHUNK_MINUTES,
         "language_hint": API_DEFAULT_LANGUAGE_HINT,
         "prompt": API_DEFAULT_PROMPT,
+        "meeting_description": "",
+        "participants": [],
     }

@@ -12,6 +12,7 @@ from common.http import APIError
 
 from .pipeline import run_transcription_pipeline_raw
 from .execution import run_isolated
+from .prompts import prompt_snapshot
 from .checkpoints import CheckpointMismatch, ChunkCheckpoint, current_checkpoint
 from .providers import (
     ProviderError,
@@ -164,7 +165,7 @@ def submit_recording(queue, username, upload, parameters, request_key=None):
             username,
             Path(upload.name).name,
             input_path,
-            parameters,
+            prompt_snapshot(parameters),
             request_key,
         )
         enqueued = True

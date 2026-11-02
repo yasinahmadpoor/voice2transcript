@@ -27,11 +27,16 @@ let deletionInFlight = null;
 const cancelRequests = new Set();
 const settingInputs = document.querySelectorAll('[data-transcription-setting]');
 const languageSelect = new LanguageSelect();
+const meetingContext = new MeetingContext(() => {
+  resetWorkspace();
+  showLogin('Your session has expired. Sign in again.');
+});
 
 function resetSettings() {
   if (!transcriptionDefaults) return;
-  for (const input of settingInputs) input.value = transcriptionDefaults[input.name];
+  for (const input of settingInputs) input.value = input.name === 'participants' ? JSON.stringify(transcriptionDefaults.participants) : transcriptionDefaults[input.name];
   languageSelect.setValue($('language').value);
+  meetingContext.reset(transcriptionDefaults.participants);
 }
 
 $('reset-settings').addEventListener('click', resetSettings);
@@ -285,6 +290,7 @@ function setBusy(value) {
   $('clear-files').disabled = value;
   for (const input of settingInputs) input.disabled = value;
   languageSelect.setDisabled(value);
+  meetingContext.setDisabled(value);
   $('reset-settings').disabled = value;
   $('dropzone').classList.toggle('disabled', value);
   renderFiles();
@@ -352,6 +358,7 @@ function renderHistory(jobs) {
 async function viewJob(job) {
   const changed = selectedJob?.id !== job?.id;
   if (changed) {
+    meetingContext.clearSaved();
     ++selectionGeneration;
     loadedResultId = null;
     $('transcript-text').value = '';
@@ -524,6 +531,7 @@ async function retrySelectedJob(restart = false) {
 }
 
 $('retry-job').addEventListener('click', () => retrySelectedJob());
+$('view-job-context').addEventListener('click', () => selectedJob && meetingContext.showSaved(selectedJob));
 $('retry-cancelled-job').addEventListener('click', () => retrySelectedJob());
 $('restart-job').addEventListener('click', () => retrySelectedJob(true));
 
@@ -589,6 +597,8 @@ $('transcribe-form').addEventListener('submit', async (event) => {
   const batch = pendingFiles();
   if (busy || !batch.length) return;
   showError('upload-error');
+  const contextError = meetingContext.validate();
+  if (contextError) { showError('upload-error', contextError); return; }
   // Snapshot settings once, before controls are disabled, for the whole batch.
   const settings = [...new FormData($('transcribe-form')).entries()].filter(([name]) => name !== 'file');
   const generation = ++uploadGeneration;
@@ -672,6 +682,10 @@ $('transcribe-form').addEventListener('submit', async (event) => {
 });
 
 function resetWorkspace() {
+  meetingContext.clear();
+  $('meeting-description').value = '';
+  $('prompt').value = '';
+  $('advanced-prompt').open = false;
   deletionInFlight = null;
   pendingDeletion = null;
   if ($('delete-dialog').open) $('delete-dialog').close();

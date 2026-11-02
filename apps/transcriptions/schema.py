@@ -6,6 +6,12 @@ from django.utils.html import format_html, format_html_join
 from common.http import methods
 
 from .defaults import transcription_defaults
+from .services.prompts import (
+    MAX_MEETING_DESCRIPTION,
+    MAX_PARTICIPANTS,
+    MAX_PARTICIPANT_DESCRIPTION,
+    MAX_PARTICIPANT_NAME,
+)
 
 OPERATIONS = {
     "/health": {"get": ("Health check", "200")},
@@ -16,6 +22,12 @@ OPERATIONS = {
     "/transcription/providers": {
         "get": ("List enabled transcription providers", "200")
     },
+    "/transcription/prompt-preview": {
+        "post": (
+            "Preview combined transcription instructions without a model call",
+            "200",
+        )
+    },
     "/jobs": {
         "get": ("List recent jobs", "200"),
         "post": ("Submit a recording", "202"),
@@ -25,6 +37,9 @@ OPERATIONS = {
         "delete": ("Remove a recording", "204"),
     },
     "/jobs/{job_id}/result": {"get": ("Download transcript", "200")},
+    "/jobs/{job_id}/context": {
+        "get": ("Read the owner's saved meeting details and prompt snapshot", "200")
+    },
     "/jobs/{job_id}/retry": {
         "post": ("Resume a failed or cancelled job, or restart explicitly", "202")
     },
@@ -38,11 +53,23 @@ def openapi(request):
     properties = {"file": {"type": "string", "format": "binary"}}
     for name, value in transcription_defaults().items():
         properties[name] = {
-            "type": "number" if name == "chunk_minutes" else "string",
+            "type": "array"
+            if name == "participants"
+            else "number"
+            if name == "chunk_minutes"
+            else "string",
             "default": value,
         }
     properties["chunk_minutes"].update(minimum=0, maximum=120)
     properties["language_hint"]["maxLength"] = 100
+    properties["meeting_description"]["maxLength"] = MAX_MEETING_DESCRIPTION
+    properties["participants"].update(
+        maxItems=MAX_PARTICIPANTS, items={"$ref": "#/components/schemas/Participant"}
+    )
+    context_properties = {
+        name: properties[name]
+        for name in ("prompt", "meeting_description", "participants")
+    }
     paths = {}
     public = {"/health", "/auth/login", "/auth/logout"}
     for path, operations in OPERATIONS.items():
@@ -81,7 +108,10 @@ def openapi(request):
                     "required": True,
                     "content": {
                         "multipart/form-data": {
-                            "schema": {"$ref": "#/components/schemas/Recording"}
+                            "schema": {"$ref": "#/components/schemas/Recording"},
+                            "encoding": {
+                                "participants": {"contentType": "application/json"}
+                            },
                         }
                     },
                 }
@@ -97,6 +127,29 @@ def openapi(request):
                         },
                     }
                 ]
+            if path == "/transcription/prompt-preview":
+                operation["requestBody"] = {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/MeetingContext"}
+                        }
+                    },
+                }
+                operation["responses"][status]["content"] = {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {"effective_prompt": {"type": "string"}},
+                        }
+                    }
+                }
+            if path == "/jobs/{job_id}/context":
+                operation["responses"][status]["content"] = {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/SavedContext"}
+                    }
+                }
             if path == "/auth/login":
                 operation["requestBody"] = {
                     "required": True,
@@ -165,6 +218,30 @@ def openapi(request):
                     }
                 },
                 "schemas": {
+                    "Participant": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "maxLength": MAX_PARTICIPANT_NAME,
+                            },
+                            "description": {
+                                "type": "string",
+                                "maxLength": MAX_PARTICIPANT_DESCRIPTION,
+                            },
+                        },
+                    },
+                    "MeetingContext": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": context_properties,
+                    },
+                    "SavedContext": {
+                        "type": "object",
+                        "properties": context_properties
+                        | {"effective_prompt": {"type": "string"}},
+                    },
                     "Job": {
                         "type": "object",
                         "properties": {
@@ -219,7 +296,7 @@ def docs(request):
     )
     return HttpResponse(
         format_html(
-            '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Transcription API</title><body><h1>Transcription API</h1><p>Sign in at <a href="/">the app</a> or POST JSON username and password to /auth/login. Keep the returned session cookie.</p><p><a href="/openapi.json">OpenAPI schema</a></p><table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>{}</tbody></table><p>Upload multipart fields: file, model, fallback_model, chunk_minutes, language_hint, prompt. Defaults are available at /transcription/defaults. Optional Idempotency-Key prevents duplicate upload retries.</p></body></html>',
+            '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Transcription API</title><body><h1>Transcription API</h1><p>Sign in at <a href="/">the app</a> or POST JSON username and password to /auth/login. Keep the returned session cookie.</p><p><a href="/openapi.json">OpenAPI schema</a></p><table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>{}</tbody></table><p>Upload multipart fields: file, provider, model, fallback_model, chunk_minutes, language_hint, prompt, meeting_description, participants (JSON array). Defaults are available at /transcription/defaults. Optional Idempotency-Key prevents duplicate upload retries.</p></body></html>',
             rows,
         )
     )

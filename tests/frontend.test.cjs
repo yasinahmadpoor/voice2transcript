@@ -9,14 +9,16 @@ const root = resolve(__dirname, '..');
 const html = readFileSync(resolve(root, 'apps/transcriptions/templates/transcriptions/index.html'), 'utf8');
 const source = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/app.js'), 'utf8');
 const languageSource = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/language-select.js'), 'utf8');
+const meetingSource = readFileSync(resolve(root, 'apps/transcriptions/static/transcriptions/meeting-context.js'), 'utf8');
 const themeSource = readFileSync(resolve(root, 'static/js/theme.js'), 'utf8');
 const defaults = {
   provider: '3',
   model: 'server-primary', fallback_model: 'server-fallback',
+  meeting_description: '', participants: [],
   chunk_minutes: 20, language_hint: 'fa', prompt: 'Server transcription instructions.',
 };
 
-async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, onDelete = null, theme = null } = {}) {
+async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = null, onDelete = null, onPreview = null, onContext = null, theme = null } = {}) {
   const elements = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -68,6 +70,8 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
     append(name, value) { this.set(name, value); }
   }
   const requests = [];
+  const previews = [];
+  const contextRequests = [];
   const context = vm.createContext({
     document: { readyState: 'complete', getElementById: get, querySelectorAll: () => inputs, createElement: () => get(`created-${++elementId}`), documentElement: {dataset:{theme:'dark'}}, querySelector: () => get('theme-meta') },
     window: { addEventListener() {} },
@@ -81,6 +85,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
       if (url === '/auth/login') return {ok:true};
       if (url === '/transcription/defaults') return { ok: true, json: async () => defaults };
       if (url === '/transcription/providers') return {ok:true,json:async () => ({providers:[{id:'3',name:'Gemini',model:defaults.model,fallback_model:defaults.fallback_model},{id:'7',name:'Custom audio',model:'custom-audio',fallback_model:''}]})};
+      if (url === '/transcription/prompt-preview') { const body = JSON.parse(options.body); previews.push(body); return onPreview ? onPreview(body, options) : {ok:true,json:async () => ({effective_prompt:'Server-generated final prompt'})}; }
       if (url === '/auth/logout') return { ok: true };
       if (url === '/jobs' && !options) {
         return { ok: true, json: async () => structuredClone({ jobs: serverJobs, max_active: 2, active: serverJobs.filter(job => job.status === 'processing').length, queued: serverJobs.filter(job => job.status === 'queued').length }) };
@@ -103,6 +108,7 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
       const [, , id, action] = url.split('/');
       const job = serverJobs.find(item => item.id === id);
       if (!job) return { ok: false, status: 404, json: async () => ({detail:'Job not found.'}) };
+      if (action === 'context') { contextRequests.push(id); return onContext ? onContext(job,options) : {ok:true,json:async () => job.context || {meeting_description:'',participants:[],prompt:'Original',effective_prompt:'Original'}}; }
       if (action === 'result') return { ok: true, text: async () => job.transcript || 'SPEAKER_1: Test transcript' };
       if (action === 'retry') {
         retries.push({id,options});
@@ -129,9 +135,10 @@ async function workspace({ jobs = [], saved = null, onUpload = null, onCancel = 
   });
   vm.runInContext(themeSource, context);
   vm.runInContext(languageSource, context);
+  vm.runInContext(meetingSource, context);
   vm.runInContext(source, context);
   await new Promise(resolve => setImmediate(resolve));
-  return { get, inputs, requests, timers, storage, uploadHeaders, deletions, retries, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
+  return { get, inputs, requests, previews, contextRequests, participants: () => get('participant-list').children.map(card => ({ name: card.children[2], description: card.children[4], remove: card.children[0].children[1] })), timers, storage, uploadHeaders, deletions, retries, jobs:() => serverJobs, setJobs: jobs => {serverJobs = structuredClone(jobs);}, setAccount: account => {currentAccount = account;} };
 }
 
 test('shared theme defaults to dark, toggles, and restores a saved preference', async () => {
@@ -163,12 +170,115 @@ test('shared theme initializes before paint and tolerates pages without a toggle
 test('loads the API defaults into every transcription setting and resets edits', async () => {
   const { get, inputs } = await workspace();
   assert.deepEqual(inputs.map(input => input.name).sort(), Object.keys(defaults).sort());
-  for (const input of inputs) assert.equal(String(input.value), String(defaults[input.name]));
+  for (const input of inputs) assert.equal(String(input.value), input.name === 'participants' ? JSON.stringify(defaults.participants) : String(defaults[input.name]));
   get('model').value = 'edited';
   get('prompt').value = 'edited';
   get('reset-settings').listeners.click();
   assert.equal(get('model').value, defaults.model);
   assert.equal(get('prompt').value, defaults.prompt);
+});
+
+test('participant fields add, remove, validate descriptions, and reset with meeting details', async () => {
+  const ui = await workspace();
+  assert.equal(ui.participants().length, 1);
+  const row = ui.participants()[0];
+  row.description.value = 'Project lead'; row.description.listeners.input();
+  await ui.get('preview-prompt').listeners.click();
+  assert.match(ui.get('prompt-preview-error').textContent, /Enter a name/);
+  assert.equal(ui.previews.length, 0);
+  row.name.value = 'Sara'; row.name.listeners.input();
+  ui.get('meeting-description').value = 'Quarterly planning';
+  ui.get('add-participant').listeners.click();
+  assert.equal(ui.participants().length, 2);
+  assert.deepEqual(JSON.parse(ui.get('participants-data').value), [{name:'Sara', description:'Project lead'}]);
+  ui.participants()[1].remove.listeners.click();
+  assert.equal(ui.participants().length, 1);
+  ui.get('reset-settings').listeners.click();
+  assert.equal(ui.get('meeting-description').value, '');
+  assert.equal(ui.get('participants-data').value, '[]');
+  assert.equal(ui.participants()[0].name.value, '');
+  for (let index = 1; index < 20; index++) ui.get('add-participant').listeners.click();
+  assert.equal(ui.get('add-participant').disabled, true);
+  ui.get('add-participant').listeners.click();
+  assert.equal(ui.participants().length, 20);
+});
+
+test('final prompt preview sends original fields to the server and uses its exact response', async () => {
+  const ui = await workspace({onPreview: async body => ({ok:true,json:async () => ({effective_prompt:'Exact server prompt\n<script>literal text</script>'})})});
+  ui.get('meeting-description').value = 'Planning';
+  ui.get('prompt').value = 'Return JSON only';
+  const row = ui.participants()[0]; row.name.value = 'Sara'; row.description.value = 'Lead'; row.name.listeners.input();
+  await ui.get('preview-prompt').listeners.click();
+  assert.deepEqual(ui.previews[0], {prompt:'Return JSON only',meeting_description:'Planning',participants:[{name:'Sara',description:'Lead'}]});
+  assert.equal(ui.get('prompt-preview-text').textContent, 'Exact server prompt\n<script>literal text</script>');
+  assert.equal(ui.get('prompt-preview').hidden, false);
+  assert.equal(ui.get('prompt-preview-text').innerHTML, undefined);
+  assert.equal(ui.get('prompt').value, 'Return JSON only');
+  ui.get('meeting-description').listeners.input();
+  assert.equal(ui.get('prompt-preview').hidden, true);
+  assert.equal(ui.get('prompt-preview-text').textContent, '');
+});
+
+test('editing fields discards a late prompt preview and clears private preview on logout', async () => {
+  let finish;
+  const ui = await workspace({onPreview: () => new Promise(resolve => {finish = resolve;})});
+  const pending = ui.get('preview-prompt').listeners.click();
+  ui.get('meeting-description').value = 'Changed meeting'; ui.get('meeting-description').listeners.input();
+  finish({ok:true,json:async () => ({effective_prompt:'Stale private context'})});
+  await pending;
+  assert.equal(ui.get('prompt-preview-text').textContent, '');
+  assert.equal(ui.get('prompt-preview').hidden, true);
+  await ui.get('logout').listeners.click();
+  assert.equal(ui.get('meeting-description').value, '');
+  assert.equal(ui.get('prompt').value, '');
+  assert.equal(ui.get('participants-data').value, '[]');
+});
+
+test('meeting context is one immutable snapshot shared by every upload in a batch', async () => {
+  let ui;
+  ui = await workspace({onUpload: async (options, count) => {
+    assert.ok(ui.participants().every(row => row.name.disabled && row.description.disabled && row.remove.disabled));
+    assert.equal(ui.get('add-participant').disabled, true);
+    if (count === 1) ui.get('meeting-description').value = 'Changed during upload';
+  }});
+  ui.get('meeting-description').value = 'Original meeting';
+  const row = ui.participants()[0]; row.name.value = 'Sara'; row.name.listeners.input();
+  ui.get('file-input').listeners.change({target:{files:[{name:'one.wav',size:100},{name:'two.wav',size:100}]}});
+  await ui.get('transcribe-form').listeners.submit({preventDefault(){}});
+  assert.equal(ui.requests.length, 2);
+  for (const request of ui.requests) {
+    assert.equal(request.get('meeting_description'), 'Original meeting');
+    assert.deepEqual(JSON.parse(request.get('participants')), [{name:'Sara',description:''}]);
+  }
+});
+
+test('saved context is read only and renders participant markup as literal text', async () => {
+  const context = {meeting_description:'Planning',participants:[{name:'<script>literal</script>',description:'Lead'}],prompt:'Saved base',effective_prompt:'Saved final'};
+  const ui = await workspace({saved:'saved-job',jobs:[{id:'saved-job',filename:'meeting.wav',status:'completed',context}]});
+  await ui.get('view-job-context').listeners.click();
+  assert.equal(ui.get('job-context-dialog').open, true);
+  assert.equal(ui.get('context-meeting').textContent, 'Planning');
+  assert.equal(ui.get('context-participants').children[0].textContent, '<script>literal</script> — Lead');
+  assert.equal(ui.get('context-original-prompt').textContent, 'Saved base');
+  assert.equal(ui.get('context-final-prompt').textContent, 'Saved final');
+  assert.equal(ui.get('meeting-description').value, '');
+  assert.equal(ui.get('prompt').value, defaults.prompt);
+  ui.get('close-job-context').listeners.click();
+  assert.equal(ui.get('job-context-dialog').open, false);
+  assert.equal(ui.get('context-final-prompt').textContent, '');
+});
+
+test('logging out aborts saved-context loading and prevents stale private details from appearing', async () => {
+  let finish;
+  const ui = await workspace({saved:'saved-job',jobs:[{id:'saved-job',filename:'private.wav',status:'completed'}],onContext: () => new Promise(resolve => {finish = resolve;})});
+  const pending = ui.get('view-job-context').listeners.click();
+  await ui.get('logout').listeners.click();
+  finish({ok:true,json:async () => ({meeting_description:'Private meeting',participants:[],prompt:'Private',effective_prompt:'Private final'})});
+  await pending;
+  assert.equal(ui.get('job-context-dialog').open, false);
+  assert.equal(ui.get('context-job-name').textContent, '');
+  assert.equal(ui.get('context-final-prompt').textContent, '');
+  assert.equal(ui.get('context-meeting').textContent, '');
 });
 
 test('submits all edited settings with the selected file, preserving zero and empty values', async () => {
@@ -178,6 +288,7 @@ test('submits all edited settings with the selected file, preserving zero and em
   const values = {
     provider: '7',
     model: 'custom-primary', fallback_model: '', chunk_minutes: '0',
+    meeting_description: '', participants: '[]',
     language_hint: '', prompt: 'Custom instructions\nwith a second line.',
   };
   for (const input of inputs) input.value = values[input.name];
@@ -186,7 +297,7 @@ test('submits all edited settings with the selected file, preserving zero and em
   const payload = requests[0];
   assert.equal(payload.get('file'), file, 'Selected/dragged file must replace a stale native file input');
   for (const [name, value] of Object.entries(values)) assert.equal(payload.get(name), value);
-  assert.equal(payload.size, 7);
+  assert.equal(payload.size, Object.keys(values).length + 1);
   assert.ok(inputs.every(input => !input.disabled));
   assert.equal(get('reset-settings').disabled, false);
   assert.equal(get('processing').hidden, false);

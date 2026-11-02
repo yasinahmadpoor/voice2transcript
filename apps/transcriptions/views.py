@@ -8,8 +8,9 @@ from django.shortcuts import render
 
 from common.http import APIError, methods, validated
 
-from .defaults import transcription_defaults
-from .forms import TranscriptionForm, request_key
+from .defaults import API_DEFAULT_PROMPT, transcription_defaults
+from .forms import PromptContextForm, TranscriptionForm, request_key
+from .services.prompts import compose_prompt
 from .services.jobs import submit_recording
 from .services.runtime import get_queue
 
@@ -34,6 +35,36 @@ def providers(request):
 @methods("GET")
 def health(request):
     return JsonResponse({"ok": True})
+
+
+@methods("POST")
+def prompt_preview(request):
+    try:
+        data = json.loads(request.body)
+    except (ValueError, UnicodeDecodeError):
+        raise APIError(
+            422, "Expected JSON with prompt, meeting_description, and participants."
+        ) from None
+    if (
+        not isinstance(data, dict)
+        or set(data) - {"prompt", "meeting_description", "participants"}
+        or not isinstance(data.get("prompt", ""), str)
+        or not isinstance(data.get("meeting_description", ""), str)
+        or not isinstance(data.get("participants", []), list)
+    ):
+        raise APIError(
+            422,
+            "Expected text prompt and meeting_description fields and a participants array.",
+        )
+    parameters = {
+        "prompt": API_DEFAULT_PROMPT,
+        "meeting_description": "",
+        "participants": [],
+    } | data
+    if not parameters["prompt"]:
+        parameters["prompt"] = API_DEFAULT_PROMPT
+    fields = validated(PromptContextForm(parameters))
+    return JsonResponse({"effective_prompt": compose_prompt(**fields)})
 
 
 @methods("GET", "POST")
@@ -69,6 +100,11 @@ def transcript_response(text):
 @methods("GET")
 def job_result(request, job_id):
     return transcript_response(get_queue().result(job_id, request.account))
+
+
+@methods("GET")
+def job_context(request, job_id):
+    return JsonResponse(get_queue().context(job_id, request.account))
 
 
 @methods("POST")
